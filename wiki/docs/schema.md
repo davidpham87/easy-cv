@@ -16,28 +16,30 @@ This document outlines the Datascript schema design for the Easy CV project. The
  ;; Other person attributes (implicit):
  ;; :person/name, :person/phone, :person/website, :person/summary, :person/location
 
- ;; --- Experience ---
- ;; Professional experience entries.
- :experience/company {}
- :experience/role {}
- :experience/start-date {}
- :experience/end-date {} ;; nil or missing if current
- :experience/description {}
- :experience/location {}
+ ;; --- Organization ---
+ ;; Generic entity for Company, School, etc.
+ :org/name     {}
+ :org/type     {} ;; :company, :school
+ :org/location {}
+ :org/url      {}
 
- ;; --- Education ---
- ;; Educational background.
- :education/institution {}
- :education/degree {}
- :education/field {}
- :education/start-date {}
- :education/end-date {}
- :education/description {}
+ ;; --- History Item (Experience & Education) ---
+ ;; Unified entity for professional experience and education.
+ :history/organization {:db/valueType :db.type/ref}
+ :history/type         {} ;; :work, :education
+ :history/title        {} ;; Job Title or Degree
+ :history/subtitle     {} ;; Field of Study (for education)
+ :history/start-date   {}
+ :history/end-date     {} ;; nil or missing if current
+ :history/description  {}
+ :history/location     {} ;; If different from Org location (e.g. remote)
 
  ;; --- Skill ---
  ;; Skills and competencies.
- :skill/name {:db/unique :db.unique/identity}
- ;; :skill/category, :skill/level
+ :skill/name        {:db/unique :db.unique/identity}
+ :skill/category    {} ;; e.g., "Language", "Framework"
+ :skill/level       {} ;; e.g., "Expert", "Beginner"
+ :skill/description {}
 
  ;; --- Project ---
  ;; Side projects or significant work projects.
@@ -46,6 +48,13 @@ This document outlines the Datascript schema design for the Easy CV project. The
  :project/url {}
  :project/skills {:db/cardinality :db.cardinality/many
                   :db/valueType   :db.type/ref}
+
+ ;; --- Document ---
+ ;; Documents linked in the CV.
+ :document/name {}
+ :document/url  {}
+ :document/type {} ;; :publication, :reference, :diploma
+ :document/date {}
 
  ;; --- Hobby ---
  ;; Interests and hobbies.
@@ -57,16 +66,16 @@ This document outlines the Datascript schema design for the Easy CV project. The
  :cv/title {}
  :cv/person      {:db/valueType :db.type/ref}
 
- :cv/experiences {:db/cardinality :db.cardinality/many
-                  :db/valueType   :db.type/ref}
-
- :cv/educations  {:db/cardinality :db.cardinality/many
+ :cv/history     {:db/cardinality :db.cardinality/many
                   :db/valueType   :db.type/ref}
 
  :cv/skills      {:db/cardinality :db.cardinality/many
                   :db/valueType   :db.type/ref}
 
  :cv/projects    {:db/cardinality :db.cardinality/many
+                  :db/valueType   :db.type/ref}
+
+ :cv/documents   {:db/cardinality :db.cardinality/many
                   :db/valueType   :db.type/ref}
 
  :cv/hobbies     {:db/cardinality :db.cardinality/many
@@ -85,27 +94,33 @@ Represents the user.
 - `:person/summary`: Professional summary or bio.
 - `:person/location`: Current location (City, Country).
 
-### Experience
-Represents a job or professional role.
-- `:experience/company`: Name of the employer.
-- `:experience/role`: Job title.
-- `:experience/start-date`: Start date (e.g., "YYYY-MM").
-- `:experience/end-date`: End date. If missing, implies "Present".
-- `:experience/description`: Details of responsibilities and achievements.
-- `:experience/location`: Location of the job.
+### Organization
+Represents an institution or company.
+- `:org/name`: Name of the organization (e.g., "Google", "MIT").
+- `:org/type`: Type of organization. Values: `:company`, `:school`.
+- `:org/location`: Headquarters or main location.
+- `:org/url`: Website.
 
-### Education
-Represents a degree or certification.
-- `:education/institution`: Name of the school or university.
-- `:education/degree`: Degree obtained (e.g., "B.Sc.").
-- `:education/field`: Field of study (e.g., "Computer Science").
-- `:education/start-date`: Start date.
-- `:education/end-date`: Graduation date or expected graduation.
+### History Item (Experience & Education)
+Unified entity for timeline entries like jobs and degrees.
+- `:history/type`: The type of entry. Values: `:work`, `:education`.
+- `:history/organization`: Reference to an `:org` entity.
+- `:history/title`: Main title.
+    - For Work: Job Title (e.g., "Senior Engineer").
+    - For Education: Degree (e.g., "B.Sc.").
+- `:history/subtitle`: Secondary title info.
+    - For Education: Field of study (e.g., "Computer Science").
+- `:history/start-date`: Start date (e.g., "YYYY-MM").
+- `:history/end-date`: End date. If missing, implies "Present".
+- `:history/description`: Details of responsibilities, achievements, or coursework.
+- `:history/location`: Specific location if different from Organization (e.g., Remote work).
 
 ### Skill
 Represents a specific skill.
-- `:skill/name`: Name of the skill (e.g., "Clojure", "React"). Unique to avoid duplicates.
-- `:skill/category`: Optional grouping (e.g., "Language", "Framework").
+- `:skill/name`: Name of the skill (e.g., "Clojure", "React"). Unique.
+- `:skill/category`: Grouping (e.g., "Language", "Framework").
+- `:skill/level`: Proficiency level (e.g., "Expert", "Junior").
+- `:skill/description`: Optional description or context for the skill.
 
 ### Project
 Represents a project.
@@ -113,6 +128,13 @@ Represents a project.
 - `:project/description`: Description of the project.
 - `:project/url`: Link to the project (e.g., GitHub, live demo).
 - `:project/skills`: References to `:skill` entities used in this project.
+
+### Document
+Represents an external document or resource.
+- `:document/name`: Title of the document.
+- `:document/url`: Link to the document.
+- `:document/type`: Type of document. Values: `:publication`, `:reference`, `:diploma`.
+- `:document/date`: Publication or issue date.
 
 ### Hobby
 Represents a hobby or interest.
@@ -123,8 +145,8 @@ Represents a hobby or interest.
 Represents a specific configuration for a generated CV.
 - `:cv/title`: Name of this CV version (e.g., "Frontend Developer CV").
 - `:cv/person`: Reference to the `:person` entity.
-- `:cv/experiences`: List of references to selected `:experience` entities.
-- `:cv/educations`: List of references to selected `:education` entities.
+- `:cv/history`: List of references to `:history` entities (both Work and Education).
 - `:cv/skills`: List of references to selected `:skill` entities.
 - `:cv/projects`: List of references to selected `:project` entities.
+- `:cv/documents`: List of references to selected `:document` entities.
 - `:cv/hobbies`: List of references to selected `:hobby` entities.
