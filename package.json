@@ -1,13 +1,26 @@
 {
-  "name": "clojure-base-template",
-  "version": "0.0.1",
-  "description": "Template for clojure projects",
+  "name": "easy-cv",
+  "version": "0.1.0",
+  "description": "Local-first ClojureScript CV fact archive and renderer",
+  "private": true,
+  "scripts": {
+    "css:build": "tailwindcss -i public/css/input.css -o public/css/app.css",
+    "css:watch": "npm run css:build -- --watch",
+    "dev": "shadow-cljs watch app",
+    "release": "npm run css:build && shadow-cljs release app"
+  },
   "dependencies": {
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "create-react-class": "^15.7.0"
+    "@citation-js/core": "^0.7.18",
+    "@citation-js/plugin-bibtex": "^0.7.18",
+    "@sqlite.org/sqlite-wasm": "^3.51.1-build1",
+    "create-react-class": "^15.7.0",
+    "js-yaml": "^4.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "shadow-cljs": "^3.3.2"
+    "@tailwindcss/cli": "^4.0.0",
+    "shadow-cljs": "^3.3.2",
+    "tailwindcss": "^4.0.0"
   }
 }

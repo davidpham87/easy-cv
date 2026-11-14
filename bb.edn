@@ -1,2 +1,11 @@
 {:paths ["src"]
- :tasks {}}
+ :tasks
+ {test {:doc "Run Clojure and CLJS unit tests"
+        :task (do (shell "clojure -M:test")
+                  (shell "npx shadow-cljs compile test"))}
+  lint {:doc "Run clj-kondo across src and test"
+        :task (shell "clj-kondo --lint src test")}
+  fmt  {:doc "Check code formatting with cljfmt"
+        :task (shell "cljfmt check src test")}
+  css  {:doc "Build Tailwind v4 stylesheet"
+        :task (shell "npm run css:build")}}}
