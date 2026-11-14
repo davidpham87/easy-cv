@@ -3,6 +3,7 @@
   (:require [easy-cv.core.db :as db]
             [easy-cv.core.generators :as gen]
             [easy-cv.core.honeysql :as hsql]
+            [easy-cv.core.render :as render]
             [easy-cv.core.solver :as solver]))
 
 (defn- now-ms
@@ -94,14 +95,46 @@
                        (range iters))]
      (summarize-timings (str "honeysql-" n-facts) timings))))
 
+(def render-formats
+  "Target formats benchmarked for live 60fps preview SLA (<10ms p95)."
+  [:html :latex :markdown :json-ld])
+
+(defn bench-render-format
+  "Measures render-cv p50/p95/p99 for a solved CanonicalCV and format."
+  ([canonical fmt] (bench-render-format canonical fmt 15))
+  ([canonical fmt iters]
+   (render/render-cv fmt canonical {})
+   (let [timings (mapv (fn [_]
+                         (let [t0 (now-ms)]
+                           (render/render-cv fmt canonical {})
+                           (- (now-ms) t0)))
+                       (range iters))
+         summary (summarize-timings (str "render-" (name fmt)) timings)]
+     (assoc summary
+            :bench/format fmt
+            :bench/sla-ms 10.0
+            :bench/sla-pass? (< (:bench/p95 summary) 10.0)))))
+
+(defn bench-render-suite
+  "Measures all render-cv formats against a solved senior CanonicalCV."
+  ([] (bench-render-suite 15))
+  ([iters]
+   (let [{:bench/keys [tx-data cv-id person cfg]}
+         (build-scaled-archive 100)
+         full-tx (vec (distinct (concat [person cfg] tx-data)))
+         dval (db/create-db full-tx)
+         canonical (solver/solve-cv dval cv-id)]
+     (mapv #(bench-render-format canonical % iters) render-formats))))
+
 (defn run-suite
-  "Runs the full solver (50/200/500 facts) and HoneySQL benchmark suite."
+  "Runs solver (50/200/500), HoneySQL, and render-cv benchmark suites."
   ([] (run-suite 15))
   ([iters]
    {:bench/solve [(bench-solve-scale 50 iters)
                   (bench-solve-scale 200 iters)
                   (bench-solve-scale 500 iters)]
-    :bench/honeysql (bench-honeysql-batch 500 iters)}))
+    :bench/honeysql (bench-honeysql-batch 500 iters)
+    :bench/render (bench-render-suite iters)}))
 
 (defn -main
   "CLI entrypoint printing formatted p50/p95/p99 benchmark results."
