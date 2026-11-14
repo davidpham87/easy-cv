@@ -9,6 +9,8 @@
         :task (shell "cljfmt check src test")}
   css  {:doc "Build Tailwind v4 stylesheet"
         :task (shell "npm run css:build")}
+  latex-assets {:doc "Download BusyTeX WASM assets to public/core"
+                :task (shell "npm run latex:assets")}
   e2e  {:doc "Run Playwright ClojureScript E2E tests"
         :task (do (shell "npm run css:build")
                   (shell "npx shadow-cljs compile app e2e"))}}}

@@ -2,8 +2,10 @@
 
  :dev-http
  {8080 {:root "public"
-        :headers {"Cross-Origin-Opener-Policy" "same-origin"
-                  "Cross-Origin-Embedder-Policy" "require-corp"}}}
+        :push-state/headers
+        {"content-type" "text/html; charset=utf-8"
+         "Cross-Origin-Opener-Policy" "same-origin"
+         "Cross-Origin-Embedder-Policy" "require-corp"}}}
 
  :builds
  {:app
@@ -19,14 +21,12 @@
    :devtools {:autobuild true
               :after-load easy-cv.ui.core/reload!
               :preload [devtools.preload]}
-   :modules {:shared             {:entries []}
-             :main               {:init-fn easy-cv.ui.core/init
-                                  :depends-on #{:shared}}
+   :modules {:main               {:init-fn easy-cv.ui.core/init}
              :persistence-worker {:init-fn easy-cv.workers.persistence/init
-                                  :depends-on #{:shared}
+                                  :depends-on #{:main}
                                   :web-worker true}
              :compute-worker     {:init-fn easy-cv.workers.compute/init
-                                  :depends-on #{:shared}
+                                  :depends-on #{:main}
                                   :web-worker true}}}
 
   :test

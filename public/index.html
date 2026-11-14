@@ -11,14 +11,15 @@
                  img-src 'self' data: blob:;
                  font-src 'self' data:;
                  worker-src 'self' blob:;
-                 connect-src 'self' ws: wss:;">
+                 frame-src 'self' blob:;
+                 object-src 'self' blob:;
+                 connect-src 'self' blob: ws: wss:;">
   <title>Easy CV</title>
   <link rel="stylesheet" href="/css/app.css">
 </head>
 <body>
   <noscript>Enable JavaScript to run Easy CV.</noscript>
   <div id="app"></div>
-  <script src="/js/shared.js"></script>
   <script src="/js/main.js"></script>
 </body>
 </html>

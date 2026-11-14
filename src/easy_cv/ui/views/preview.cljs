@@ -2,9 +2,11 @@
   "Style Customizer, live CV preview, and multi-format export view."
   (:require [clojure.string :as str]
             [easy-cv.core.db :as db]
+            [easy-cv.core.latex-wasm :as lw]
             [easy-cv.core.render :as render]
             [easy-cv.core.solver :as solver]
             [easy-cv.fx.datascript :as fx-ds]
+            [easy-cv.fx.latex-wasm]
             [easy-cv.ui.components.common :as common]
             [easy-cv.ui.components.cv-blocks :as cv-blocks]
             [easy-cv.ui.components.layout :as layout]
@@ -141,6 +143,55 @@
  (fn [_ _]
    {:render/print! true}))
 
+(rf/reg-event-db
+ ::set-latex-engine
+ (fn [db [_ engine-kw]]
+   (assoc-in db [:render :latex-wasm :engine]
+             (lw/normalize-engine engine-kw))))
+
+(rf/reg-event-fx
+ ::compile-latex-pdf
+ (fn [{:keys [db]} [_ outputs]]
+   (let [latex-out (:latex outputs)
+         wasm-state (get-in db [:render :latex-wasm])
+         engine (lw/normalize-engine (:engine wasm-state))]
+     {:db (update-in db [:render :latex-wasm] merge
+                     {:engine engine :latex/status :compiling :error nil})
+      :latex/compile {:tex (:tex latex-out)
+                      :bib (:bib latex-out)
+                      :engine engine
+                      :prev-url (:pdf-url wasm-state)
+                      :on-success [::latex-compile-ok]
+                      :on-error [::latex-compile-err]}})))
+
+(rf/reg-event-db
+ ::latex-compile-ok
+ (fn [db [_ {:keys [outcome pdf-url pdf-uint8]}]]
+   (-> db
+       (update-in [:render :latex-wasm] merge
+                  {:latex/status :ready
+                   :pdf-url pdf-url
+                   :pdf-uint8 pdf-uint8
+                   :pdf-bytes (:pdf-bytes outcome)
+                   :log (:log outcome)
+                   :error nil})
+       (assoc-in [:render :preview-mode] :pdf))))
+
+(rf/reg-event-db
+ ::latex-compile-err
+ (fn [db [_ outcome]]
+   (update-in db [:render :latex-wasm] merge
+              {:latex/status :error
+               :log (:log outcome)
+               :error (or (:error outcome)
+                          (not-empty (:log outcome))
+                          (str "Exit " (:exit-code outcome)))})))
+
+(rf/reg-sub
+ ::latex-wasm
+ (fn [db _]
+   (merge (lw/initial-state) (get-in db [:render :latex-wasm]))))
+
 (rf/reg-sub
  ::style-config
  (fn [db _]
@@ -212,6 +263,47 @@
      {:export/label ".jsonld" :export/file "cv.jsonld"
       :export/mime "application/ld+json" :export/content (:json-ld outputs)}]))
 
+(defn- latex-compile-status-bar
+  [{:keys [pdf-bytes error pdf-uint8] status :latex/status}]
+  [:div {:class "space-y-1"}
+   (when (= status :ready)
+     [:div {:class "flex flex-wrap items-center gap-2"}
+      [:span {:data-testid "latex-compile-status"
+              :class "text-xs font-medium text-emerald-500"}
+       (str "Compiled PDF (" pdf-bytes " bytes)")]
+      (when pdf-uint8
+        [common/button
+         {:size :xs :data-testid "download-compiled-pdf-btn"
+          :on-click #(rf/dispatch [::download-export "cv.pdf"
+                                   "application/pdf" pdf-uint8])}
+         "Download cv.pdf"])])
+   (when (= status :error)
+     [:p {:data-testid "latex-compile-error"
+          :class "text-xs text-rose-500"}
+      error])])
+
+(defn- latex-wasm-panel
+  [outputs latex-state]
+  (let [engine (:engine latex-state)
+        busy? (= :compiling (:latex/status latex-state))]
+    [common/card {:class "p-4 space-y-2"}
+     [:h3 {:class "text-sm font-bold"} "LaTeX WASM (BusyTeX)"]
+     [:div {:class "flex flex-wrap items-center gap-2"}
+      [common/select
+       (assoc {:data-testid "latex-engine-select"
+               :on-change #(rf/dispatch [::set-latex-engine
+                                         (keyword (.. % -target -value))])}
+              :value (name engine))
+       (for [{:engine/keys [key label]} lw/engine-labels]
+         ^{:key key}
+         [:option (assoc {} :value (name key)) label])]
+      [common/button
+       {:size :xs :variant :primary :disabled busy?
+        :data-testid "compile-latex-pdf-btn"
+        :on-click #(rf/dispatch [::compile-latex-pdf outputs])}
+       (if busy? "Compiling..." "Compile PDF (BusyTeX)")]]
+     [latex-compile-status-bar latex-state]]))
+
 (defn- export-buttons-panel
   [outputs export-msg]
   [common/card {:class "p-4 space-y-2"}
@@ -240,6 +332,25 @@
     {:density (:density style-cfg)
      :class-overrides {:sheet "print:shadow-none print:border-0"}}]])
 
+(defn- compiled-pdf-pane
+  [{:keys [pdf-url log error] status :latex/status}]
+  [:div {:class "space-y-3" :data-testid "compiled-pdf-pane"}
+   (cond
+     pdf-url
+     [:iframe {:src pdf-url :title "Compiled LaTeX PDF"
+               :data-testid "compiled-pdf-frame"
+               :class "w-full h-[640px] rounded border"}]
+     (= status :compiling)
+     [common/card {} "Compiling LaTeX document via BusyTeX WASM..."]
+     error
+     [common/card {} (str "Compilation failed: " error)]
+     :else
+     [common/card {} "Click Compile PDF (BusyTeX) to build the PDF."])
+   (when (seq log)
+     [:details {:class "text-xs"}
+      [:summary {:class "cursor-pointer font-semibold"} "LaTeX Log"]
+      [common/pre-block {:content log}]])])
+
 (defn- preview-toolbar
   [mode tab]
   [:div {:class (cls "flex flex-wrap items-center justify-between gap-2"
@@ -250,7 +361,10 @@
      "Live Sheet"]
     [common/button {:size :sm :variant (when (= mode :source) :primary)
                     :on-click #(rf/dispatch [::set-preview-mode :source])}
-     "Source Inspector"]]
+     "Source Inspector"]
+    [common/button {:size :sm :variant (when (= mode :pdf) :primary)
+                    :on-click #(rf/dispatch [::set-preview-mode :pdf])}
+     "Compiled PDF"]]
    (when (= mode :source)
      [:div {:class "flex flex-wrap gap-1.5"}
       (for [{:fmt/keys [key label]} source-tabs]
@@ -260,13 +374,14 @@
          label])])])
 
 (defn- preview-pane
-  [canonical style-cfg outputs mode tab]
+  [canonical style-cfg outputs mode tab latex-state]
   [:div {:class "p-4 overflow-auto h-full"}
    [preview-toolbar mode tab]
    (if canonical
-     (if (= mode :sheet)
-       [live-sheet-preview canonical style-cfg]
-       [common/pre-block {:content (format-source-text outputs tab)}])
+     (case mode
+       :source [common/pre-block {:content (format-source-text outputs tab)}]
+       :pdf [compiled-pdf-pane latex-state]
+       [live-sheet-preview canonical style-cfg])
      [common/card {} "No CVConfig found in DataScript archive."])])
 
 (defn view
@@ -277,10 +392,13 @@
         tab @(rf/subscribe [::source-tab])
         canonical @(rf/subscribe [::resolved-cv])
         outputs @(rf/subscribe [::rendered-outputs])
-        export-msg @(rf/subscribe [::export-msg])]
+        export-msg @(rf/subscribe [::export-msg])
+        latex-state @(rf/subscribe [::latex-wasm])]
     [layout/split-view {:ratio :1-2}
      [:div {:class "p-4 space-y-4 print:hidden"}
       [style-customizer-panel style-cfg]
       (when outputs
-        [export-buttons-panel outputs export-msg])]
-     [preview-pane canonical style-cfg outputs mode tab]]))
+        [:<>
+         [export-buttons-panel outputs export-msg]
+         [latex-wasm-panel outputs latex-state]])]
+     [preview-pane canonical style-cfg outputs mode tab latex-state]]))
