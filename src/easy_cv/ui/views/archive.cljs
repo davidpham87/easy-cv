@@ -309,7 +309,7 @@
   "Render a labeled text input bound to an event prefix."
   [lbl placeholder v evt]
   [:div
-   [common/label {} lbl]
+   [common/label lbl]
    [common/input (with-val {:placeholder placeholder :on-change-event evt} v)]])
 
 (defn- filter-toolbar
@@ -317,14 +317,15 @@
   []
   (let [ft @(rf/subscribe [::filter-type])
         ftag @(rf/subscribe [::filter-tag])
-        fq @(rf/subscribe [::search-text])]
+        fq @(rf/subscribe [::search-text])
+        on-type #(rf/dispatch [::set-filter-type
+                               (keyword (.. % -target -value))])]
     [common/card {:class "mb-4"}
      [:div {:class "grid grid-cols-1 md:grid-cols-3 gap-3"}
       [:div
-       [common/label {} "Fact Type"]
+       [common/label "Fact Type"]
        [common/select
-        (with-val {:class "w-full text-sm"
-                   :on-change #(rf/dispatch [::set-filter-type (keyword %)])}
+        (with-val {:class "w-full text-sm" :on-change on-type}
           (subs (str ft) 1))
         (for [k fact-type-options]
           (let [s (subs (str k) 1)] (select-opt s s)))]]
@@ -335,22 +336,22 @@
 (defn- quick-kind-select
   "Render quick-entry fact kind dropdown."
   [kind]
-  [:div
-   [common/label {} "Kind"]
-   [common/select
-    (with-val {:class "w-full text-sm"
-               :on-change #(rf/dispatch [::update-quick-fact
-                                         :fact/kind (keyword %)])}
-      (name (or kind :skill)))
-    (for [k [:skill :work :education :project :document :hobby]]
-      (select-opt (name k) (name k)))]])
+  (let [on-k #(rf/dispatch [::update-quick-fact
+                            :fact/kind (keyword (.. % -target -value))])]
+    [:div
+     [common/label "Kind"]
+     [common/select
+      (with-val {:class "w-full text-sm" :on-change on-k}
+        (name (or kind :skill)))
+      (for [k [:skill :work :education :project :document :hobby]]
+        (select-opt (name k) (name k)))]]))
 
 (defn- quick-add-card
   "Render inline form for quickly adding a fact to DataScript."
   []
   (let [qf @(rf/subscribe [::quick-fact])]
     [common/card {:class "mb-4"}
-     [common/section-header {:title "Quick Add Fact"}]
+     [common/section-header "Quick Add Fact"]
      [:div {:class "grid grid-cols-1 md:grid-cols-4 gap-2 items-end"}
       [quick-kind-select (:fact/kind qf)]
       [labeled-input "Title / Name" "Clojure, Dev" (:fact/title qf)
@@ -398,14 +399,14 @@
 (defn- tier-loader-card
   "Render career tier dropdown and fake archive loader button."
   []
-  (let [tier @(rf/subscribe [::selected-tier])]
+  (let [tier @(rf/subscribe [::selected-tier])
+        on-t #(rf/dispatch [::set-selected-tier
+                            (keyword (.. % -target -value))])]
     [common/card {}
-     [common/section-header {:title "Seeded Fake Archives"}]
+     [common/section-header "Seeded Fake Archives"]
      [:div {:class "flex gap-2 items-center"}
       [common/select
-       (with-val {:class "flex-grow text-sm"
-                  :on-change #(rf/dispatch [::set-selected-tier (keyword %)])}
-         (name tier))
+       (with-val {:class "flex-grow text-sm" :on-change on-t} (name tier))
        (for [t gen/tiers] (select-opt (name t) (name t)))]
       [common/button {:variant :primary :size :sm
                       :on-click #(rf/dispatch [::load-tier-archive])}
@@ -428,7 +429,7 @@
   (let [snaps @(rf/subscribe [::snapshots])
         lbl @(rf/subscribe [::snapshot-label])]
     [common/card {}
-     [common/section-header {:title "Epochal Snapshots"}]
+     [common/section-header "Epochal Snapshots"]
      [:div {:class "flex gap-2 mb-3"}
       [common/input (with-val {:placeholder "Snapshot label..."
                                :on-change-event [::set-snapshot-label]} lbl)]
@@ -441,7 +442,7 @@
   "Render SQLite/JSON export card."
   []
   [common/card {}
-   [common/section-header {:title "SQLite / JSON Export"}]
+   [common/section-header "SQLite / JSON Export"]
    [common/button {:variant :primary :size :sm :class "w-full"
                    :on-click #(rf/dispatch [::export-sql-json])}
     "Export SQL Tables JSON"]])
@@ -462,9 +463,9 @@
     [layout/split-view {:ratio :2-1}
      [:div {:class "p-4"}
       [common/page-header
-       {:title "Fact Archive"
-        :description (str (count shown) " shown of "
-                          (count all-facts) " facts")}]
+       "Fact Archive"
+       [:span {:class (str "text-sm " t/text-muted)}
+        (str (count shown) " shown of " (count all-facts) " facts")]]
       [filter-toolbar]
       [quick-add-card]
       [facts-table]]

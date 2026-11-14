@@ -127,6 +127,45 @@
           (when (not= :single-col layout-k)
             (is (contains-hiccup-tag? hiccup :aside))))))))
 
+(defn- expand-hiccup
+  "Recursively expand Reagent [fn & args] component nodes for smoke tests."
+  [node]
+  (cond
+    (and (vector? node) (fn? (first node)))
+    (expand-hiccup (apply (first node) (rest node)))
+    (vector? node) (mapv expand-hiccup node)
+    (seq? node) (doall (map expand-hiccup node))
+    :else node))
+
+(defn- find-select-on-change
+  "Return first :on-change fn found on a :select element in Hiccup tree."
+  [node]
+  (cond
+    (and (vector? node) (= :select (first node)) (map? (second node)))
+    (:on-change (second node))
+    (vector? node) (some find-select-on-change (rest node))
+    (seq? node) (some find-select-on-change node)
+    :else nil))
+
+(deftest views-hiccup-render-smoke-test
+  (testing "Archive and Solver views expand all child components cleanly"
+    (reset-test-conn!)
+    (rf-test/run-test-sync
+     (rf/dispatch [::archive/init])
+     (rf/dispatch [::solver/init])
+     (rf/dispatch [::archive/load-tier-archive :junior])
+     (rf/dispatch [::solver/toggle-preview])
+     (let [arch-tree (expand-hiccup [archive/view])
+           solv-tree (expand-hiccup [solver/view])
+           on-chg (find-select-on-change arch-tree)]
+       (is (= :div (first arch-tree)))
+       (is (= :div (first solv-tree)))
+       (is (contains-hiccup-tag? arch-tree :label))
+       (is (contains-hiccup-tag? solv-tree :select))
+       (is (fn? on-chg))
+       (on-chg #js {:target #js {:value "skill"}})
+       (is (= :skill @(rf/subscribe [::archive/filter-type])))))))
+
 (defspec generated-cvs-render-and-export-cleanly 24
   (prop/for-all
    [tier (gen/elements cv-gen/tiers)

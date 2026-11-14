@@ -282,7 +282,7 @@
   [new-title]
   [:div {:class "flex gap-2 items-end"}
    [:div {:class "flex-grow"}
-    [common/label {} "New CV Target"]
+    [common/label "New CV Target"]
     [common/input (with-val {:placeholder "Staff Backend CV"
                              :on-change-event [::set-new-cv-title]}
                     new-title)]]
@@ -293,15 +293,15 @@
 (defn- target-selector-card
   "Render CV target switcher and new target creation input."
   [configs active-id]
-  (let [new-title @(rf/subscribe [::new-cv-title])]
+  (let [new-title @(rf/subscribe [::new-cv-title])
+        on-sel #(when-let [cv-id (find-cv-id configs (.. % -target -value))]
+                  (rf/dispatch [::select-cv cv-id]))]
     [common/card {:class "mb-4"}
      [:div {:class "grid grid-cols-1 md:grid-cols-2 gap-3 items-end"}
       [:div
-       [common/label {} "Active CV Target"]
+       [common/label "Active CV Target"]
        [common/select
-        (with-val {:class "w-full text-sm"
-                   :on-change #(when-let [cv-id (find-cv-id configs %)]
-                                 (rf/dispatch [::select-cv cv-id]))}
+        (with-val {:class "w-full text-sm" :on-change on-sel}
           (if active-id (str active-id) ""))
         (for [cfg configs]
           (select-opt (str (:cv/id cfg))
@@ -334,7 +334,7 @@
   "Render candidate facts table for toggling include/exclude rules."
   [cfg items]
   [common/card {:class "mb-4"}
-   [common/section-header {:title "Fact Include / Exclude"}]
+   [common/section-header "Fact Include / Exclude"]
    [common/table-container {}
     [common/table {}
      [common/thead {}
@@ -359,13 +359,12 @@
 (defn- override-field-select
   "Render attribute dropdown for per-CV override editing."
   [fld]
-  [common/select
-   (with-val {:class "w-full text-sm"
-              :on-change #(rf/dispatch [::set-override-draft
-                                        :override/field (keyword %)])}
-     (subs (str fld) 1))
-   (for [f override-field-options]
-     (let [s (subs (str f) 1)] (select-opt s s)))])
+  (let [on-f #(rf/dispatch [::set-override-draft
+                            :override/field (keyword (.. % -target -value))])]
+    [common/select
+     (with-val {:class "w-full text-sm" :on-change on-f} (subs (str fld) 1))
+     (for [f override-field-options]
+       (let [s (subs (str f) 1)] (select-opt s s)))]))
 
 (defn- override-editor-card
   "Render per-CV field override form and active overrides list."
@@ -375,7 +374,7 @@
         fld (or (:override/field draft) :history/title)
         txt (or (:override/text draft) "")]
     [common/card {}
-     [common/section-header {:title "Per-CV Overrides"}]
+     [common/section-header "Per-CV Overrides"]
      [:div {:class "space-y-2"}
       [:div {:class (str "text-xs " t/text-muted)}
        (if uid (str "Selected UUID: " uid) "Pick a fact row -> Edit")]
@@ -402,7 +401,7 @@
         count-map (into {} (map (juxt :section/id :section/count) counts))
         order (or (seq (:cv/section-order cfg)) solver/default-section-order)]
     [common/card {:class "mb-4"}
-     [common/section-header {:title "Section Order & Solved Counts"}]
+     [common/section-header "Section Order & Solved Counts"]
      [:div {:class "space-y-2"}
       (for [sec-id order]
         (section-order-row cv-id sec-id (get count-map sec-id 0)))]]))
@@ -433,8 +432,10 @@
         counts @(rf/subscribe [::section-counts])]
     [layout/split-view {:ratio :1-1}
      [:div {:class "p-4"}
-      [common/page-header {:title "Multi-CV Solver"
-                           :description "Configure targets, rules & overrides"}]
+      [common/page-header
+       "Multi-CV Solver"
+       [:span {:class (str "text-sm " t/text-muted)}
+        "Configure targets, rules & overrides"]]
       [target-selector-card configs (:cv/id cfg)]
       (when cfg [fact-inclusion-card cfg items])
       (when cfg [override-editor-card cfg])]
