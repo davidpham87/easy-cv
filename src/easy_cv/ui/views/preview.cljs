@@ -7,6 +7,7 @@
             [easy-cv.core.solver :as solver]
             [easy-cv.fx.datascript :as fx-ds]
             [easy-cv.fx.latex-wasm]
+            [easy-cv.fx.react-pdf]
             [easy-cv.ui.components.common :as common]
             [easy-cv.ui.components.cv-blocks :as cv-blocks]
             [easy-cv.ui.components.layout :as layout]
@@ -164,6 +165,19 @@
                       :on-success [::latex-compile-ok]
                       :on-error [::latex-compile-err]}})))
 
+(rf/reg-event-fx
+ ::compile-react-pdf
+ (fn [{:keys [db]} [_ canonical style-cfg]]
+   (let [prev-url (get-in db [:render :latex-wasm :pdf-url])]
+     {:db (update-in db [:render :latex-wasm] merge
+                     {:latex/status :compiling :pdf/backend :react-pdf
+                      :error nil})
+      :react-pdf/compile {:canonical canonical
+                          :style-cfg style-cfg
+                          :prev-url prev-url
+                          :on-success [::latex-compile-ok]
+                          :on-error [::latex-compile-err]}})))
+
 (rf/reg-event-db
  ::latex-compile-ok
  (fn [db [_ {:keys [outcome pdf-url pdf-uint8]}]]
@@ -282,26 +296,34 @@
           :class "text-xs text-rose-500"}
       error])])
 
-(defn- latex-wasm-panel
-  [outputs latex-state]
-  (let [engine (:engine latex-state)
-        busy? (= :compiling (:latex/status latex-state))]
+(defn- busytex-controls
+  [engine outputs busy?]
+  [:<>
+   [common/select
+    (assoc {:data-testid "latex-engine-select"
+            :on-change #(rf/dispatch [::set-latex-engine
+                                      (keyword (.. % -target -value))])}
+           :value (name engine))
+    (for [{:engine/keys [key label]} lw/engine-labels]
+      ^{:key key}
+      [:option (assoc {} :value (name key)) label])]
+   [common/button
+    {:size :xs :disabled busy? :data-testid "compile-latex-pdf-btn"
+     :on-click #(rf/dispatch [::compile-latex-pdf outputs])}
+    (if busy? "Compiling..." "Compile PDF (BusyTeX)")]])
+
+(defn- pdf-engine-panel
+  [canonical style-cfg outputs latex-state]
+  (let [busy? (= :compiling (:latex/status latex-state))]
     [common/card {:class "p-4 space-y-2"}
-     [:h3 {:class "text-sm font-bold"} "LaTeX WASM (BusyTeX)"]
+     [:h3 {:class "text-sm font-bold"} "PDF Build (React-PDF / BusyTeX)"]
      [:div {:class "flex flex-wrap items-center gap-2"}
-      [common/select
-       (assoc {:data-testid "latex-engine-select"
-               :on-change #(rf/dispatch [::set-latex-engine
-                                         (keyword (.. % -target -value))])}
-              :value (name engine))
-       (for [{:engine/keys [key label]} lw/engine-labels]
-         ^{:key key}
-         [:option (assoc {} :value (name key)) label])]
       [common/button
        {:size :xs :variant :primary :disabled busy?
-        :data-testid "compile-latex-pdf-btn"
-        :on-click #(rf/dispatch [::compile-latex-pdf outputs])}
-       (if busy? "Compiling..." "Compile PDF (BusyTeX)")]]
+        :data-testid "compile-react-pdf-btn"
+        :on-click #(rf/dispatch [::compile-react-pdf canonical style-cfg])}
+       (if busy? "Building..." "Instant PDF (React-PDF)")]
+      [busytex-controls (:engine latex-state) outputs busy?]]
      [latex-compile-status-bar latex-state]]))
 
 (defn- export-buttons-panel
@@ -400,5 +422,5 @@
       (when outputs
         [:<>
          [export-buttons-panel outputs export-msg]
-         [latex-wasm-panel outputs latex-state]])]
+         [pdf-engine-panel canonical style-cfg outputs latex-state]])]
      [preview-pane canonical style-cfg outputs mode tab latex-state]]))

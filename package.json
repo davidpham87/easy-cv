@@ -4,7 +4,7 @@
   "description": "Local-first ClojureScript CV fact archive and renderer",
   "private": true,
   "scripts": {
-    "assets:copy": "mkdir -p public/js && cp node_modules/@sqlite.org/sqlite-wasm/sqlite-wasm/jswasm/sqlite3.wasm node_modules/@sqlite.org/sqlite-wasm/sqlite-wasm/jswasm/sqlite3-opfs-async-proxy.js public/js/",
+    "assets:copy": "node scripts/prepare-assets.cjs",
     "latex:assets": "npx texlyre-busytex download-assets ./public/core",
     "postinstall": "npm run assets:copy",
     "css:build": "tailwindcss -i public/css/input.css -o public/css/app.css",

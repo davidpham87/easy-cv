@@ -9,37 +9,6 @@
             [easy-cv.core.latex-wasm :as lw]
             [malli.core :as m]))
 
-(defn- read-compiled-pdf-info
-  "Fetches the blob iframe URL in-page and inspects its %PDF- header."
-  [^js page]
-  (.evaluate page
-             (fn []
-               (let [el (.querySelector js/document
-                                        "[data-testid='compiled-pdf-frame']")
-                     src (when el (.getAttribute el "src"))]
-                 (if-not src
-                   (js/Promise.resolve #js {:src nil :head nil :bytes 0})
-                   (-> (js/fetch src)
-                       (.then #(.arrayBuffer %))
-                       (.then (fn [buf]
-                                (let [u8 (js/Uint8Array. buf)
-                                      head (.decode (js/TextDecoder.)
-                                                    (.slice u8 0 5))]
-                                  #js {:src src
-                                       :head head
-                                       :bytes (.-length u8)})))))))))
-
-(defn- wait-for-latex-status!
-  "Waits up to 90s for either compiled PDF status or error element."
-  [^js page]
-  (let [ok (.locator page "[data-testid='latex-compile-status']")
-        err (.locator page "[data-testid='latex-compile-error']")]
-    (js/Promise.race
-     #js [(.waitFor ok #js {:timeout 90000})
-          (-> (.waitFor err #js {:timeout 90000})
-              (.then #(.textContent err))
-              (.then #(throw (js/Error. (str "LaTeX compile error: " %)))))])))
-
 (defn- trigger-compile-flow!
   "Opens Preview view and clicks Compile PDF (BusyTeX), returning PDF info."
   [^js page url]
@@ -48,10 +17,10 @@
     (-> (.goto page (str url "#/preview") #js {:waitUntil "domcontentloaded"})
         (.then #(.waitFor compile-btn #js {:timeout 10000}))
         (.then #(.click compile-btn))
-        (.then #(wait-for-latex-status! page))
+        (.then #(support/wait-for-pdf-status! page 90000))
         (.then #(.textContent status-el))
         (.then (fn [status-txt]
-                 (-> (read-compiled-pdf-info page)
+                 (-> (support/read-pdf-blob-info page)
                      (.then (fn [info]
                               {:status-txt status-txt
                                :src (.-src info)

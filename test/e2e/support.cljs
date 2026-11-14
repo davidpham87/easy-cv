@@ -137,3 +137,33 @@
                  (.on page "pageerror" #(swap! errors conj %))
                  (test-fn page (:url @state) errors)))
         (.finally #(cleanup! (:browser @state) (:server @state))))))
+
+(defn read-pdf-blob-info
+  "Fetches the blob iframe URL in-page and returns {:src :head :bytes}."
+  [^js page]
+  (.evaluate page
+             (fn []
+               (let [^js el (.querySelector
+                             js/document "[data-testid='compiled-pdf-frame']")
+                     src (when el (.getAttribute el "src"))]
+                 (if-not src
+                   (js/Promise.resolve #js {:src nil :head nil :bytes 0})
+                   (-> (js/fetch src)
+                       (.then #(.arrayBuffer %))
+                       (.then (fn [buf]
+                                (let [u8 (js/Uint8Array. buf)
+                                      head (.decode (js/TextDecoder.)
+                                                    (.slice u8 0 5))]
+                                  #js {:src src :head head
+                                       :bytes (.-length u8)})))))))))
+
+(defn wait-for-pdf-status!
+  "Waits for compiled PDF status banner or rejects on compile error."
+  [^js page timeout-ms]
+  (let [ok (.locator page "[data-testid='latex-compile-status']")
+        err (.locator page "[data-testid='latex-compile-error']")]
+    (js/Promise.race
+     #js [(.waitFor ok #js {:timeout timeout-ms})
+          (-> (.waitFor err #js {:timeout timeout-ms})
+              (.then #(.textContent err))
+              (.then #(throw (js/Error. (str "PDF build error: " %)))))])))
