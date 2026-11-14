@@ -7,8 +7,10 @@
             [easy-cv.ui.components.layout :as layout]
             [easy-cv.ui.components.navigation :as nav]
             [easy-cv.ui.theme :as theme]
+            [easy-cv.ui.views.archive :as archive]
             [easy-cv.ui.views.editor :as editor]
             [easy-cv.ui.views.preview :as preview]
+            [easy-cv.ui.views.solver :as solver]
             [malli.core :as m]
             [malli.registry :as mr]
             [malli.util :as mu]
@@ -52,6 +54,14 @@
   "Route-dispatched primary workspace panel."
   identity)
 
+(defmethod view :archive
+  [_]
+  [archive/view])
+
+(defmethod view :solver
+  [_]
+  [solver/view])
+
 (defmethod view :editor
   [_]
   [editor/view])
@@ -69,13 +79,8 @@
   [preview/view])
 
 (defmethod view :default
-  [route-kw]
-  [layout/container {:class "py-8"}
-   [common/card {}
-    [:h2 {:class "text-lg font-bold"}
-     (str "Workspace: " (name (or route-kw :archive)))]
-    [:p {:class "mt-2 text-sm"}
-     "Use the navigation menu for Editor or Preview & Export."]]])
+  [_]
+  [archive/view])
 
 (defn theme-toggle
   "Renders theme selector buttons inside the top bar portal."

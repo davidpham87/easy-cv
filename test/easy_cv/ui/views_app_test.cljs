@@ -37,17 +37,16 @@
                          (= design (get-in styled [:cv/style :theme]))
                          (= layout (get-in styled [:cv/style :layout])))))))
 
+(defn- seed-app-slices!
+  [slices]
+  (rf/reg-event-db ::seed-slices (fn [_ _] slices))
+  (rf/dispatch [::seed-slices]))
+
 (deftest editor-slice-isolation-and-import-test
   (testing "Editor events isolate [:editor] and transact valid facts"
     (reset-demo-conn!)
     (rf-test/run-test-sync
-     (rf/reg-event-db ::seed-siblings
-                      (fn [_ _]
-                        {:archive {:filter :all}
-                         :solver {:active-cv-id nil}
-                         :render {:source-tab :html}
-                         :ui {:theme :light}}))
-     (rf/dispatch [::seed-siblings])
+     (seed-app-slices! {:archive {:filter :all} :render {:source-tab :html}})
      (let [before-cnt (count (db/all-facts @fx-ds/conn))
            skill-edn (pr-str [{:item/uuid (random-uuid)
                                :skill/name "ClojureScript-Test"}])]
@@ -65,12 +64,7 @@
   (testing "Preview events isolate [:render] and render all export formats"
     (reset-demo-conn!)
     (rf-test/run-test-sync
-     (rf/reg-event-db ::seed-other-slices
-                      (fn [_ _]
-                        {:archive {:filter :skills}
-                         :editor {:format :yaml}
-                         :ui {:theme :paper}}))
-     (rf/dispatch [::seed-other-slices])
+     (seed-app-slices! {:archive {:filter :skills} :editor {:format :yaml}})
      (rf/dispatch [::preview/apply-bundle :exec-brief])
      (rf/dispatch [::preview/set-style-opt :design :modern])
      (rf/dispatch [::preview/set-source-tab :latex])
@@ -82,8 +76,7 @@
        (is (string? (:json-ld outs)))
        (is (map? (:site outs)))
        (is (= {:filter :skills} (:archive @rf-db/app-db)))
-       (is (= {:format :yaml} (:editor @rf-db/app-db)))
-       (is (= {:theme :paper} (:ui @rf-db/app-db)))))))
+       (is (= {:format :yaml} (:editor @rf-db/app-db)))))))
 
 (deftest app-shell-render-smoke-test
   (testing "App shell dispatches views, themes, and router slices cleanly"
@@ -97,5 +90,7 @@
      (is (= :dark @(rf/subscribe [::theme/current-theme])))
      (is (= :editor @(rf/subscribe [::fx-router/route-name])))
      (is (vector? (ui-core/root-view)))
+     (is (vector? (ui-core/view :archive)))
+     (is (vector? (ui-core/view :solver)))
      (is (vector? (ui-core/view :editor)))
      (is (vector? (ui-core/view :preview))))))

@@ -6,6 +6,7 @@
             [easy-cv.core.solver :as solver]
             [easy-cv.fx.datascript :as fx-ds]
             [easy-cv.ui.components.common :as common]
+            [easy-cv.ui.components.cv-blocks :as cv-blocks]
             [easy-cv.ui.components.layout :as layout]
             [easy-cv.ui.styles :as styles]
             [easy-cv.ui.theme :as t]
@@ -231,43 +232,13 @@
    (when export-msg
      [:p {:class (cls "text-xs" t/text-muted)} export-msg])])
 
-(defn- sheet-item-view
-  [item classes]
-  (let [title (or (:history/title item) (:project/name item)
-                  (:skill/name item) (:document/name item)
-                  (:hobby/name item) "Item")
-        sub (or (get-in item [:history/organization :org/name])
-                (:skill/level item) (:document/venue item)
-                (:hobby/description item))]
-    [:li {:class (:item classes)}
-     [:span {:class (:item-title classes)} title]
-     (when sub [:span {:class (cls "ml-2" (:muted classes))} sub])]))
-
-(defn- sheet-section-view
-  [{:section/keys [id items]} classes]
-  (when (seq items)
-    [:section {:class (:section classes)}
-     [:h2 {:class (:section-title classes)} (name id)]
-     [:ul {:class "space-y-1"}
-      (for [[idx item] (map-indexed vector items)]
-        ^{:key (or (:item/uuid item) idx)}
-        [sheet-item-view item classes])]]))
-
-(defn- fallback-sheet-preview
+(defn- live-sheet-preview
   [canonical style-cfg]
-  (let [classes (styles/resolve-cv-classes style-cfg)
-        p (:cv/person canonical)]
-    [:div (assoc {} :id "cv-sheet"
-                 :class (cls "rounded print:shadow-none" (:sheet classes)))
-     [:header {:class (:header classes)}
-      [:h1 {:class (:title classes)} (:person/name p)]
-      [:p {:class (:subtitle classes)}
-       (str (:person/email p)
-            (when-let [loc (:person/location p)] (str " · " loc)))]]
-     [:div {:class (:body classes)}
-      (for [sec (:cv/sections canonical)]
-        ^{:key (:section/id sec)}
-        [sheet-section-view sec classes])]]))
+  [:div (assoc {} :id "cv-sheet" :class "print:shadow-none")
+   [cv-blocks/cv-preview
+    canonical
+    {:density (:density style-cfg)
+     :class-overrides {:sheet "print:shadow-none print:border-0"}}]])
 
 (defn- preview-toolbar
   [mode tab]
@@ -294,7 +265,7 @@
    [preview-toolbar mode tab]
    (if canonical
      (if (= mode :sheet)
-       [fallback-sheet-preview canonical style-cfg]
+       [live-sheet-preview canonical style-cfg]
        [common/pre-block {:content (format-source-text outputs tab)}])
      [common/card {} "No CVConfig found in DataScript archive."])])
 
