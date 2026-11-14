@@ -4,7 +4,9 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [easy-cv.utils.worker :as worker]))
+            [easy-cv.fx.persistence :as fx-p]
+            [easy-cv.utils.worker :as worker]
+            [re-frame.core :as rf]))
 
 (defn- make-mock-worker!
   "Creates an in-memory mock js/Worker supporting addEventListener."
@@ -99,3 +101,27 @@
                  (is (= 1 (count @cancelled)))
                  (worker/terminate! bus)
                  (done)))))))
+
+(deftest fx-persistence-dispatch-test
+  (testing "fx.persistence initializes bus and routes RPC replies"
+    (async done
+           (let [got (atom nil)
+                 mock (make-mock-worker!
+                       (fn [msg send!]
+                         (send! (worker/reply-envelope
+                                 (:msg/id msg)
+                                 (:msg/op msg)
+                                 {:persistence/ok true}))))]
+             (rf/reg-event-db
+              ::fx-ok
+              (fn [db [_ res]]
+                (reset! got res)
+                (is (= {:persistence/ok true} @got))
+                (done)
+                db))
+             (fx-p/init-persistence!
+              {:persistence/factory (fn [_] (:mock/worker mock))})
+             (fx-p/send-worker-fx!
+              {:worker/op :persistence/upsert-fact
+               :worker/payload {:fact/uuid "u1"}
+               :worker/on-success [::fx-ok]})))))
