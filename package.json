@@ -4,10 +4,13 @@
   "description": "Local-first ClojureScript CV fact archive and renderer",
   "private": true,
   "scripts": {
+    "assets:copy": "mkdir -p public/js && cp node_modules/@sqlite.org/sqlite-wasm/sqlite-wasm/jswasm/sqlite3.wasm node_modules/@sqlite.org/sqlite-wasm/sqlite-wasm/jswasm/sqlite3-opfs-async-proxy.js public/js/",
+    "postinstall": "npm run assets:copy",
     "css:build": "tailwindcss -i public/css/input.css -o public/css/app.css",
     "css:watch": "npm run css:build -- --watch",
-    "dev": "shadow-cljs watch app",
-    "release": "npm run css:build && shadow-cljs release app"
+    "dev": "npm run assets:copy && shadow-cljs watch app",
+    "release": "npm run assets:copy && npm run css:build && shadow-cljs release app",
+    "test:e2e": "npm run assets:copy && npm run css:build && shadow-cljs compile app e2e"
   },
   "dependencies": {
     "@citation-js/core": "^0.7.18",
@@ -20,6 +23,7 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.0.0",
+    "playwright": "^1.65.1",
     "shadow-cljs": "^3.3.2",
     "tailwindcss": "^4.0.0"
   }

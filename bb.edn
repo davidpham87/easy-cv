@@ -8,4 +8,7 @@
   fmt  {:doc "Check code formatting with cljfmt"
         :task (shell "cljfmt check src test")}
   css  {:doc "Build Tailwind v4 stylesheet"
-        :task (shell "npm run css:build")}}}
+        :task (shell "npm run css:build")}
+  e2e  {:doc "Run Playwright ClojureScript E2E tests"
+        :task (do (shell "npm run css:build")
+                  (shell "npx shadow-cljs compile app e2e"))}}}

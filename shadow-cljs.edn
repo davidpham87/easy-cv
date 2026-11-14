@@ -33,4 +33,10 @@
   {:target :node-test
    :output-to "target/node-tests.js"
    :ns-regexp "easy-cv\\..*-test$"
+   :autorun true}
+
+  :e2e
+  {:target :node-test
+   :output-to "target/e2e-tests.js"
+   :ns-regexp "e2e\\..*-test$"
    :autorun true}}}
