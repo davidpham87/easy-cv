@@ -24,6 +24,9 @@
                                   :depends-on #{:shared}}
              :persistence-worker {:init-fn easy-cv.workers.persistence/init
                                   :depends-on #{:shared}
+                                  :web-worker true}
+             :compute-worker     {:init-fn easy-cv.workers.compute/init
+                                  :depends-on #{:shared}
                                   :web-worker true}}}
 
   :test
