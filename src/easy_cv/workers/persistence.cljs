@@ -50,27 +50,32 @@
    :cv-configs (query-rows! db (hsql/select-cv-configs-query))
    :snapshots (query-rows! db (hsql/select-snapshots-query))})
 
+(defn- exec-ok!
+  [db query]
+  (exec-sql! db query)
+  {:persistence/ok true})
+
+(def ^:private op-table
+  {:persistence/upsert-fact
+   (fn [{:sqlite/keys [db]} p] (exec-ok! db (hsql/upsert-fact-query p)))
+   :persistence/delete-fact
+   (fn [{:sqlite/keys [db]} p]
+     (exec-ok! db (hsql/delete-fact-query (:fact/uuid p))))
+   :persistence/upsert-cv-config
+   (fn [{:sqlite/keys [db]} p] (exec-ok! db (hsql/upsert-cv-config-query p)))
+   :persistence/save-snapshot
+   (fn [{:sqlite/keys [db]} p] (exec-ok! db (hsql/insert-snapshot-query p)))
+   :persistence/load-all
+   (fn [{:sqlite/keys [db]} p] (load-all! db p))
+   :persistence/export-sql-json
+   (fn [{:sqlite/keys [db]} p] (export-sql-json! db (:exported-at p)))
+   :persistence/export-sqlite
+   (fn [state _] {:sqlite/bytes (vec (export-sqlite-bytes! state))})})
+
 (defn- dispatch-op!
-  [{:sqlite/keys [db] :as state} op payload]
-  (case op
-    :persistence/upsert-fact
-    (do (exec-sql! db (hsql/upsert-fact-query payload))
-        {:persistence/ok true})
-    :persistence/delete-fact
-    (do (exec-sql! db (hsql/delete-fact-query (:fact/uuid payload)))
-        {:persistence/ok true})
-    :persistence/upsert-cv-config
-    (do (exec-sql! db (hsql/upsert-cv-config-query payload))
-        {:persistence/ok true})
-    :persistence/save-snapshot
-    (do (exec-sql! db (hsql/insert-snapshot-query payload))
-        {:persistence/ok true})
-    :persistence/load-all
-    (load-all! db payload)
-    :persistence/export-sql-json
-    (export-sql-json! db (:exported-at payload))
-    :persistence/export-sqlite
-    {:sqlite/bytes (vec (export-sqlite-bytes! state))}
+  [state op payload]
+  (if-let [op-fn (get op-table op)]
+    (op-fn state payload)
     {:persistence/error (str "Unknown persistence op: " op)}))
 
 (defn- post-reply!

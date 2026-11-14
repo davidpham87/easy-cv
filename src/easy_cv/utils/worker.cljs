@@ -58,6 +58,25 @@
       (a/put! ch err-msg)
       (a/close! ch))))
 
+(defn- attach-message-listener!
+  [w on-message out-chan]
+  (.addEventListener
+   w "message"
+   (fn [e]
+     (let [msg (decode-event e)]
+       (if on-message (on-message msg) (a/put! out-chan msg))))))
+
+(defn- attach-error-listener!
+  [w on-error out-chan]
+  (.addEventListener
+   w "error"
+   (fn [e]
+     (let [err {:msg/op :worker/error
+                :msg/payload {:error/message (.-message e)}}]
+       (if on-error
+         (on-error err)
+         (when out-chan (a/put! out-chan err)))))))
+
 (defn create-worker!
   "Spawns a Web Worker from url (or custom :worker/factory) with Transit."
   ([url]
@@ -66,19 +85,8 @@
          :or {factory #(js/Worker. %)}}]
    (let [w (factory url)
          out-chan (when-not on-message (a/chan 16))]
-     (.addEventListener
-      w "message"
-      (fn [e]
-        (let [msg (decode-event e)]
-          (if on-message (on-message msg) (a/put! out-chan msg)))))
-     (.addEventListener
-      w "error"
-      (fn [e]
-        (let [err {:msg/op :worker/error
-                   :msg/payload {:error/message (.-message e)}}]
-          (if on-error
-            (on-error err)
-            (when out-chan (a/put! out-chan err))))))
+     (attach-message-listener! w on-message out-chan)
+     (attach-error-listener! w on-error out-chan)
      (cond-> {:worker/instance w}
        out-chan (assoc :worker/out-chan out-chan)))))
 
