@@ -7,52 +7,112 @@
             [easy-cv.core.react-pdf :as rp]
             [re-frame.core :as rf]))
 
+(defn- chip-radius
+  [chip-style]
+  (case chip-style
+    :pill 10
+    :tonal 6
+    :outlined 4
+    :squared 0
+    :zenburn 3
+    10))
+
+(defn- header-style-map
+  [{:pdf/keys [header-bg accent-hex]}]
+  (if header-bg
+    #js {"marginBottom" 12 "padding" 14 "borderRadius" 6
+         "backgroundColor" header-bg}
+    #js {"marginBottom" 12 "paddingBottom" 8
+         "borderBottomWidth" 1.5 "borderBottomColor" accent-hex}))
+
+(defn- chip-style-map
+  [{:pdf/keys [chip-bg chip-border chip-style]}]
+  #js {"backgroundColor" (or chip-bg "#f1f5f9")
+       "borderWidth" 0.75
+       "borderColor" (or chip-border "#cbd5e1")
+       "borderRadius" (chip-radius chip-style)
+       "paddingHorizontal" 6
+       "paddingVertical" 2
+       "marginRight" 4
+       "marginBottom" 4})
+
+(defn- page-and-header-styles
+  [{:pdf/keys [accent-hex header-bg header-fg sheet-bg font-family] :as doc}]
+  #js {"page" #js {"padding" 36 "fontFamily" font-family "fontSize" 10
+                   "color" "#0f172a" "backgroundColor" (or sheet-bg "#ffffff")}
+       "header" (header-style-map doc)
+       "name" #js {"fontSize" 18 "fontWeight" "bold"
+                   "color" (or header-fg accent-hex)}
+       "contact" #js {"fontSize" 9 "marginTop" 3
+                      "color" (if header-bg header-fg "#475569")}
+       "summary" #js {"marginBottom" 10 "lineHeight" 1.4}
+       "secHead" #js {"fontSize" 10 "fontWeight" "bold" "color" accent-hex
+                      "marginTop" 10 "marginBottom" 4 "paddingBottom" 2
+                      "borderBottomWidth" 0.75 "borderBottomColor" accent-hex}})
+
+(defn- item-and-chip-styles
+  [{:pdf/keys [chip-fg] :as doc}]
+  #js {"item" #js {"marginBottom" 6}
+       "row" #js {"flexDirection" "row" "justifyContent" "space-between"}
+       "title" #js {"fontWeight" "bold"}
+       "meta" #js {"fontSize" 9 "color" "#64748b"}
+       "detail" #js {"marginTop" 2 "color" "#334155"}
+       "chipWrap" #js {"flexDirection" "row" "flexWrap" "wrap" "marginTop" 3}
+       "chip" (chip-style-map doc)
+       "chipText" #js {"fontSize" 8.5 "color" (or chip-fg "#1e293b")}})
+
 (defn- make-styles
   "Build @react-pdf/renderer StyleSheet from ReactPdfDoc styling values."
-  [{:pdf/keys [accent-hex font-family]}]
+  [doc]
   (.create StyleSheet
-           #js {"page" #js {"padding" 36 "fontFamily" font-family
-                            "fontSize" 10 "color" "#0f172a"}
-                "header" #js {"marginBottom" 12 "paddingBottom" 8
-                              "borderBottomWidth" 1.5
-                              "borderBottomColor" accent-hex}
-                "name" #js {"fontSize" 18 "fontWeight" "bold"
-                            "color" accent-hex}
-                "contact" #js {"fontSize" 9 "marginTop" 3 "color" "#475569"}
-                "summary" #js {"marginBottom" 10 "lineHeight" 1.4}
-                "secHead" #js {"fontSize" 10 "fontWeight" "bold"
-                               "color" accent-hex "marginTop" 10
-                               "marginBottom" 4}
-                "item" #js {"marginBottom" 6}
-                "row" #js {"flexDirection" "row"
-                           "justifyContent" "space-between"}
-                "title" #js {"fontWeight" "bold"}
-                "meta" #js {"fontSize" 9 "color" "#64748b"}
-                "detail" #js {"marginTop" 2 "color" "#334155"}}))
+           (js/Object.assign #js {}
+                             (page-and-header-styles doc)
+                             (item-and-chip-styles doc))))
 
 (defn- el
   "Create a React element with JS props and variadic children."
   [comp-type props & children]
   (apply react/createElement comp-type props children))
 
+(defn- render-chip
+  [^js styles key-str label]
+  (el View #js {"key" key-str "style" (.-chip styles)}
+      (el Text #js {"style" (.-chipText styles)} label)))
+
 (defn- render-item-el
   "Render one PdfItemLine map into a @react-pdf View element."
-  [^js styles idx {:pdf/keys [title subtitle meta detail]}]
+  [^js styles idx {:pdf/keys [title subtitle meta detail tags]}]
   (let [head (if subtitle (str title " - " subtitle) title)]
     (el View #js {"key" (str "it-" idx) "style" (.-item styles)}
         (el View #js {"style" (.-row styles)}
             (el Text #js {"style" (.-title styles)} head)
             (when meta (el Text #js {"style" (.-meta styles)} meta)))
         (when detail
-          (el Text #js {"style" (.-detail styles)} detail)))))
+          (el Text #js {"style" (.-detail styles)} detail))
+        (when (seq tags)
+          (el View #js {"style" (.-chipWrap styles)}
+              (clj->js
+               (map-indexed #(render-chip styles (str "t-" idx "-" %1) %2)
+                            tags)))))))
+
+(defn- render-skill-chips
+  [^js styles items]
+  (el View #js {"style" (.-chipWrap styles)}
+      (clj->js
+       (map-indexed
+        (fn [idx {:pdf/keys [title meta]}]
+          (render-chip styles (str "sk-" idx)
+                       (if meta (str title " · " meta) title)))
+        items))))
 
 (defn- render-section-el
   "Render one PdfSection map into a @react-pdf View block."
   [^js styles {:pdf/keys [section-id heading items]}]
   (el View #js {"key" (name section-id)}
       (el Text #js {"style" (.-secHead styles)} heading)
-      (clj->js
-       (map-indexed #(render-item-el styles %1 %2) items))))
+      (if (= section-id :skills)
+        (render-skill-chips styles items)
+        (clj->js (map-indexed #(render-item-el styles %1 %2) items)))))
 
 (defn build-pdf-element
   "Construct root @react-pdf <Document> React element from ReactPdfDoc."

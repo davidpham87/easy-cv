@@ -13,6 +13,7 @@
             [easy-cv.ui.components.layout :as layout]
             [easy-cv.ui.styles :as styles]
             [easy-cv.ui.theme :as t]
+            [easy-cv.ui.views.preview-style :as preview-style]
             [re-frame.core :as rf]))
 
 (def default-style
@@ -20,7 +21,8 @@
   {:design :academic
    :layout :single-col
    :font :sans
-   :density :balanced})
+   :density :balanced
+   :chip-style :pill})
 
 (def source-tabs
   "Output format tabs displayed in the source inspector."
@@ -43,11 +45,16 @@
   "Merges [:render :style] selections onto a solved CanonicalCV."
   [canonical style-cfg]
   (when canonical
-    (let [{:keys [design layout font]} (merge default-style style-cfg)]
+    (let [{:keys [design layout font chip-style palette colors]}
+          (merge default-style style-cfg)
+          base {:theme design
+                :layout layout
+                :font (font-preset->cv-font font)}]
       (update canonical :cv/style merge
-              {:theme design
-               :layout layout
-               :font (font-preset->cv-font font)}))))
+              (cond-> base
+                chip-style (assoc :chip-style chip-style)
+                palette (assoc :palette palette)
+                (seq colors) (assoc :colors colors))))))
 
 (defn solve-active-cv
   "Purely resolves the active (or first) CVConfig from DataScript db."
@@ -98,6 +105,24 @@
  (fn [db [_ bundle-kw]]
    (let [bundle (get styles/style-bundles bundle-kw default-style)]
      (update-in db [:render :style] merge bundle))))
+
+(rf/reg-event-db
+ ::apply-palette
+ (fn [db [_ palette-kw]]
+   (let [pal (get styles/color-palettes palette-kw)]
+     (-> db
+         (assoc-in [:render :style :palette] palette-kw)
+         (assoc-in [:render :style :colors] pal)))))
+
+(rf/reg-event-db
+ ::set-color-opt
+ (fn [db [_ color-key hex-str]]
+   (assoc-in db [:render :style :colors color-key] hex-str)))
+
+(rf/reg-event-db
+ ::reset-colors
+ (fn [db _]
+   (update-in db [:render :style] dissoc :colors :palette)))
 
 (rf/reg-event-db
  ::set-source-tab
@@ -232,37 +257,6 @@
  (fn [canonical _]
    (render-all-formats canonical)))
 
-(defn- style-select
-  [label opt-key current-val options]
-  [:div {:class "flex flex-col gap-1"}
-   [:label {:class (cls "text-xs font-semibold uppercase" t/text-muted)} label]
-   [common/select
-    (assoc {:on-change #(rf/dispatch [::set-style-opt
-                                      opt-key
-                                      (keyword (.. % -target -value))])}
-           :value (name current-val))
-    (for [k options]
-      ^{:key k}
-      [:option (assoc {} :value (name k)) (name k)])]])
-
-(defn- style-customizer-panel
-  [style-cfg]
-  [common/card {:class "p-4 space-y-3"}
-   [:h3 {:class "text-sm font-bold"} "Style Customizer"]
-   [:div {:class "flex flex-wrap gap-1.5"}
-    (for [bk (keys styles/style-bundles)]
-      ^{:key bk}
-      [common/button
-       {:size :xs :on-click #(rf/dispatch [::apply-bundle bk])}
-       (name bk)])]
-   [style-select "Design" :design (:design style-cfg)
-    (keys styles/design-presets)]
-   [style-select "Layout" :layout (:layout style-cfg)
-    (keys styles/layout-presets)]
-   [style-select "Font" :font (:font style-cfg) (keys styles/font-presets)]
-   [style-select "Density" :density (:density style-cfg)
-    (keys styles/density-presets)]])
-
 (defn- export-specs
   [outputs]
   (let [tex-bib (:latex outputs)]
@@ -352,6 +346,8 @@
    [cv-blocks/cv-preview
     canonical
     {:density (:density style-cfg)
+     :chip-style (:chip-style style-cfg)
+     :colors (:colors style-cfg)
      :class-overrides {:sheet "print:shadow-none print:border-0"}}]])
 
 (defn- compiled-pdf-pane
@@ -378,15 +374,13 @@
   [:div {:class (cls "flex flex-wrap items-center justify-between gap-2"
                      "pb-3 mb-4 border-b print:hidden" t/border-subtle)}
    [:div {:class "flex gap-2"}
-    [common/button {:size :sm :variant (when (= mode :sheet) :primary)
-                    :on-click #(rf/dispatch [::set-preview-mode :sheet])}
-     "Live Sheet"]
-    [common/button {:size :sm :variant (when (= mode :source) :primary)
-                    :on-click #(rf/dispatch [::set-preview-mode :source])}
-     "Source Inspector"]
-    [common/button {:size :sm :variant (when (= mode :pdf) :primary)
-                    :on-click #(rf/dispatch [::set-preview-mode :pdf])}
-     "Compiled PDF"]]
+    (for [[m lbl] [[:sheet "Live Sheet"]
+                   [:source "Source Inspector"]
+                   [:pdf "Compiled PDF"]]]
+      ^{:key m}
+      [common/button {:size :sm :variant (when (= mode m) :primary)
+                      :on-click #(rf/dispatch [::set-preview-mode m])}
+       lbl])]
    (when (= mode :source)
      [:div {:class "flex flex-wrap gap-1.5"}
       (for [{:fmt/keys [key label]} source-tabs]
@@ -418,7 +412,7 @@
         latex-state @(rf/subscribe [::latex-wasm])]
     [layout/split-view {:ratio :1-2}
      [:div {:class "p-4 space-y-4 print:hidden"}
-      [style-customizer-panel style-cfg]
+      [preview-style/style-customizer-panel style-cfg]
       (when outputs
         [:<>
          [export-buttons-panel outputs export-msg]

@@ -15,6 +15,13 @@
   [s]
   (str/escape (str (or s "")) html-escapes))
 
+(defn- safe-hex
+  "Return hex color string when valid #rgb/#rrggbb, else fallback."
+  [v fallback]
+  (if (and (string? v) (re-matches #"^#[0-9a-fA-F]{3,8}$" v))
+    v
+    fallback))
+
 (defn- format-dates
   "Format start-date and optional end-date into an HTML-escaped range."
   [{:history/keys [start-date end-date] :as item}]
@@ -40,6 +47,15 @@
          (when desc (str "<p>" (escape-html desc) "</p>"))
          "</li>")))
 
+(defn- render-project-tags
+  [skills]
+  (when (seq skills)
+    (str "<div class=\"cv-tags\">"
+         (apply str (map #(str "<span class=\"cv-chip\">"
+                               (escape-html %) "</span>")
+                         skills))
+         "</div>")))
+
 (defn- render-project-li
   "Render one Project item as HTML."
   [item]
@@ -53,9 +69,7 @@
          "</div>"
          (when-let [d (:project/description item)]
            (str "<p>" (escape-html d) "</p>"))
-         (when (seq skills)
-           (str "<div class=\"cv-tags\">"
-                (escape-html (str/join ", " skills)) "</div>"))
+         (render-project-tags skills)
          "</li>")))
 
 (defn- render-skill-li
@@ -121,19 +135,61 @@
            "<ul>" (apply str (map rf items)) "</ul>"
            "</section>"))))
 
+(defn- chip-radius
+  [chip-style]
+  (case chip-style
+    :pill "9999px"
+    :tonal "8px"
+    :outlined "6px"
+    :squared "0px"
+    :zenburn "4px"
+    "9999px"))
+
+(defn- css-vars-block
+  [style]
+  (let [font (get-in style [:font :body] "Inter")
+        hfont (get-in style [:font :heading] font)
+        colors (:colors style)]
+    (str ":root{--cv-font-body:\"" (escape-html font) "\",sans-serif;"
+         "--cv-font-head:\"" (escape-html hfont) "\",sans-serif;"
+         "--cv-accent:" (safe-hex (:accent colors) "#1e3a8a") ";"
+         "--cv-header-bg:" (safe-hex (:header-bg colors) "transparent") ";"
+         "--cv-header-fg:" (safe-hex (:header-fg colors) "#0f172a") ";"
+         "--cv-chip-bg:" (safe-hex (:chip-bg colors) "#f1f5f9") ";"
+         "--cv-chip-fg:" (safe-hex (:chip-fg colors) "#1e293b") ";"
+         "--cv-chip-border:" (safe-hex (:chip-border colors) "#cbd5e1") ";"
+         "--cv-sheet-bg:" (safe-hex (:sheet-bg colors) "#ffffff") ";}")))
+
+(defn- header-and-chip-css
+  [style]
+  (let [has-hdr-bg? (some? (get-in style [:colors :header-bg]))
+        rad (chip-radius (:chip-style style))]
+    (str ".cv-header{background:var(--cv-header-bg);color:var(--cv-header-fg);"
+         (when has-hdr-bg? "padding:1.25rem 1.5rem;border-radius:8px;")
+         "margin-bottom:1.25rem}"
+         ".cv-header h1,.cv-header .cv-contact,.cv-header .cv-summary"
+         "{color:var(--cv-header-fg)}"
+         ".cv-tags{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.35rem}"
+         ".cv-section[data-section=\"skills\"] ul{list-style:none;"
+         "padding:0;display:flex;flex-wrap:wrap;gap:.4rem}"
+         ".cv-skill,.cv-chip{display:inline-block;padding:.15rem .55rem;"
+         "font-size:.82em;border-radius:" rad ";"
+         "background:var(--cv-chip-bg);color:var(--cv-chip-fg);"
+         "border:1px solid var(--cv-chip-border)}")))
+
 (defn render-css
   "Generate self-contained CSS rules from CVStyle."
   [style]
-  (let [font (get-in style [:font :body] "Inter")
-        hfont (get-in style [:font :heading] font)]
-    (str ":root{--cv-font-body:\"" (escape-html font) "\",sans-serif;"
-         "--cv-font-head:\"" (escape-html hfont) "\",sans-serif;}"
-         "body{font-family:var(--cv-font-body);max-width:820px;"
-         "margin:2rem auto;padding:0 1rem;color:#111;line-height:1.5}"
-         "h1,h2{font-family:var(--cv-font-head)}"
-         "h2{border-bottom:1px solid #cbd5e1;padding-bottom:.25rem}"
-         ".cv-dates{float:right;color:#475569;font-size:.9em}"
-         "@media print{@page{size:A4;margin:14mm}body{margin:0}}")))
+  (str (css-vars-block style)
+       "body{font-family:var(--cv-font-body);max-width:820px;"
+       "margin:2rem auto;padding:1.5rem;color:#111;line-height:1.5;"
+       "background:var(--cv-sheet-bg)}"
+       "h1,h2{font-family:var(--cv-font-head)}"
+       "h2{color:var(--cv-accent);"
+       "border-bottom:1.5px solid var(--cv-accent);padding-bottom:.25rem}"
+       ".cv-dates{float:right;color:#475569;font-size:.9em}"
+       (header-and-chip-css style)
+       "@media print{@page{size:A4;margin:14mm}body{margin:0}}"))
 
 (defn- safe-json-ld-script
   "Wrap Schema.org JSON-LD safely inside a <script> tag."

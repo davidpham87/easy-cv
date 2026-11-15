@@ -5,6 +5,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [easy-cv.ui.styles :as styles]
+            [malli.core :as m]
             #?@(:cljs [[day8.re-frame.test :as rf-test]
                        [easy-cv.ui.components.common :as common]
                        [easy-cv.ui.components.layout :as layout]
@@ -13,23 +14,56 @@
                        [re-frame.core :as rf]
                        [re-frame.db :as rf-db]])))
 
-(defspec all-style-preset-combinations-resolve-test 40
-  (testing "Every design, layout, font, and density combo resolves cleanly"
+(def ^:private hex-gen
+  (gen/fmap #(apply str "#" %)
+            (gen/vector (gen/elements (seq "0123456789abcdef")) 6)))
+
+(defspec all-style-preset-combinations-resolve-test 60
+  (testing "Every design, layout, font, density, and chip combo resolves"
     (prop/for-all
      [design (gen/elements (keys styles/design-presets))
       layout-k (gen/elements (keys styles/layout-presets))
       font (gen/elements (keys styles/font-presets))
-      density (gen/elements (keys styles/density-presets))]
-     (let [resolved (styles/resolve-cv-classes
-                     {:design design
-                      :layout layout-k
-                      :font font
-                      :density density})]
-       (and (styles/valid-resolved-classes? resolved)
+      density (gen/elements (keys styles/density-presets))
+      chip-style (gen/elements (keys styles/chip-presets))
+      palette (gen/elements (keys styles/color-palettes))]
+     (let [cfg {:design design
+                :layout layout-k
+                :font font
+                :density density
+                :chip-style chip-style
+                :palette palette}
+           resolved (styles/resolve-cv-classes cfg)]
+       (and (m/validate styles/StyleConfig cfg)
+            (styles/valid-resolved-classes? resolved)
+            (= (get styles/chip-presets chip-style) (:badge resolved))
             (every? #(not (str/blank? %)) (vals resolved)))))))
 
+(defspec color-palette-and-custom-colors-resolve-test 50
+  (testing "Custom hex colors override palette defaults cleanly"
+    (prop/for-all
+     [design (gen/elements (keys styles/design-presets))
+      palette (gen/elements (keys styles/color-palettes))
+      hdr-bg hex-gen
+      chip-bg hex-gen
+      accent hex-gen]
+     (let [colors {:header-bg hdr-bg :chip-bg chip-bg :accent accent}
+           cfg {:design design :palette palette :colors colors}
+           resolved (styles/resolve-cv-colors cfg)]
+       (and (m/validate styles/StyleConfig cfg)
+            (m/validate styles/ColorMap resolved)
+            (= hdr-bg (:header-bg resolved))
+            (= chip-bg (:chip-bg resolved))
+            (= accent (:accent resolved))
+            (= 7 (count resolved)))))))
+
 (deftest style-bundles-and-overrides-test
-  (testing "Predefined bundles and class overrides resolve cleanly"
+  (testing "Predefined bundles, preset counts, and overrides resolve cleanly"
+    (is (= 8 (count styles/design-presets)))
+    (is (= 5 (count styles/layout-presets)))
+    (is (= 5 (count styles/font-presets)))
+    (is (= 5 (count styles/chip-presets)))
+    (is (= 6 (count styles/color-palettes)))
     (doseq [[_ bundle] styles/style-bundles]
       (let [resolved (styles/resolve-cv-classes
                       (assoc bundle :class-overrides {:title "tracking-wide"}))]
@@ -49,7 +83,8 @@
             :ui {:theme :light}}))
         (rf/dispatch [::seed-db])
         (let [sub (rf/subscribe [:easy-cv.ui.theme/current-theme])]
-          (is (= #{:light :dark :paper} (set (keys theme/theme-presets))))
+          (is (every? #(contains? theme/theme-presets %)
+                      [:light :dark :paper]))
           (is (= :light @sub))
           (rf/dispatch [:easy-cv.ui.theme/set-theme :dark])
           (is (= :dark @sub))
