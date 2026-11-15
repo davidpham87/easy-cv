@@ -1,2 +1,153 @@
 @import "tailwindcss";
 @source "../../src";
+
+:root {
+  --md-elevation-1:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 1px 3px 1px rgba(0, 0, 0, 0.08);
+  --md-elevation-2:
+    0 2px 6px 2px rgba(0, 0, 0, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.16);
+  --md-elevation-3:
+    0 4px 12px 3px rgba(0, 0, 0, 0.14),
+    0 2px 4px rgba(0, 0, 0, 0.18);
+  --md-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-ease-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+}
+
+@layer components {
+  .m3-tonal-surface {
+    background-color: var(--md-surface-container, var(--bg-card));
+    box-shadow: var(--md-elevation-1);
+  }
+
+  .m3-card-elevated {
+    background-color: var(--md-surface-container, var(--bg-card));
+    box-shadow: var(--md-elevation-1);
+  }
+
+  .m3-card-elevated:hover {
+    box-shadow: var(--md-elevation-2);
+  }
+
+  .m3-menu-surface {
+    background-color: var(--md-surface-container-high, var(--bg-card));
+    box-shadow: var(--md-elevation-3);
+  }
+}
+
+@keyframes m3-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes m3-panel-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes m3-menu-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body {
+    transition:
+      background-color 220ms var(--md-ease-standard),
+      color 220ms var(--md-ease-standard);
+  }
+
+  .m3-enter {
+    animation: m3-fade-up 260ms var(--md-ease-decelerate) both;
+    will-change: transform, opacity;
+  }
+
+  .m3-panel-enter {
+    animation: m3-panel-enter 280ms var(--md-ease-decelerate) both;
+    will-change: transform, opacity;
+  }
+
+  .m3-menu-enter {
+    animation: m3-menu-enter 180ms var(--md-ease-decelerate) both;
+    transform-origin: top left;
+    will-change: transform, opacity;
+  }
+
+  .m3-stagger > *:nth-child(1) { animation-delay: 0ms; }
+  .m3-stagger > *:nth-child(2) { animation-delay: 40ms; }
+  .m3-stagger > *:nth-child(3) { animation-delay: 80ms; }
+  .m3-stagger > *:nth-child(4) { animation-delay: 120ms; }
+  .m3-stagger > *:nth-child(5) { animation-delay: 160ms; }
+  .m3-stagger > *:nth-child(6) { animation-delay: 200ms; }
+
+  .m3-hover-lift {
+    transition:
+      transform 200ms var(--md-ease-standard),
+      box-shadow 200ms var(--md-ease-standard),
+      background-color 180ms ease,
+      border-color 180ms ease;
+    will-change: transform;
+  }
+
+  .m3-hover-lift:hover {
+    transform: translate3d(0, -1px, 0);
+  }
+
+  .m3-hover-lift:active {
+    transform: translate3d(0, 0, 0) scale(0.985);
+  }
+
+  .m3-interactive {
+    transition:
+      transform 160ms var(--md-ease-standard),
+      background-color 160ms ease,
+      border-color 160ms ease,
+      box-shadow 180ms ease;
+    will-change: transform;
+  }
+
+  .m3-interactive:active {
+    transform: scale(0.97);
+  }
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--md-primary, var(--border-focus));
+  outline-offset: 2px;
+}
+
+@media print {
+  .m3-enter,
+  .m3-panel-enter,
+  .m3-menu-enter {
+    animation: none !important;
+    transform: none !important;
+  }
+  .m3-tonal-surface,
+  .m3-card-elevated {
+    box-shadow: none !important;
+  }
+}

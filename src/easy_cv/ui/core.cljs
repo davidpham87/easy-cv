@@ -1,5 +1,5 @@
 (ns easy-cv.ui.core
-  "Root browser entrypoint, boot effects, and Re-frame shell for Easy CV."
+  "Root browser entrypoint, boot effects, and Re-frame MD3 shell."
   (:require [easy-cv.fx.datascript :as fx-ds]
             [easy-cv.fx.persistence]
             [easy-cv.fx.router :as fx-router]
@@ -20,10 +20,12 @@
 (defonce ^:private root-atom (atom nil))
 
 (def theme-options
-  "Available app chrome themes rendered in the top bar."
-  [{:theme/key :light :theme/label "Light"}
-   {:theme/key :dark :theme/label "Dark"}
-   {:theme/key :paper :theme/label "Paper"}])
+  "All 12 available app chrome themes rendered in the top bar."
+  theme/theme-catalog)
+
+(def quick-theme-options
+  "Quick-access chrome themes rendered as pill buttons."
+  (filterv :theme/quick? theme-options))
 
 (defn init-malli-registry!
   "Registers default and util Malli schemas once at boot."
@@ -54,49 +56,45 @@
   "Route-dispatched primary workspace panel."
   identity)
 
-(defmethod view :archive
-  [_]
-  [archive/view])
+(defmethod view :archive [_] [archive/view])
+(defmethod view :solver [_] [solver/view])
+(defmethod view :editor [_] [editor/view])
+(defmethod view :io [_] [editor/view])
+(defmethod view :preview [_] [preview/view])
+(defmethod view :styles [_] [preview/view])
+(defmethod view :default [_] [archive/view])
 
-(defmethod view :solver
-  [_]
-  [solver/view])
-
-(defmethod view :editor
-  [_]
-  [editor/view])
-
-(defmethod view :io
-  [_]
-  [editor/view])
-
-(defmethod view :preview
-  [_]
-  [preview/view])
-
-(defmethod view :styles
-  [_]
-  [preview/view])
-
-(defmethod view :default
-  [_]
-  [archive/view])
+(defn- theme-select
+  [current]
+  [common/select
+   (assoc {:class "text-xs !py-1 !px-2.5 !rounded-full font-medium"
+           :aria-label "All Themes"
+           :data-testid "theme-select"
+           :on-change #(rf/dispatch
+                        [::theme/set-theme (keyword (.. % -target -value))])}
+          (keyword "value") (name (or current :light)))
+   (for [{:theme/keys [key label]} theme-options]
+     ^{:key (name key)}
+     [:option (assoc {} (keyword "value") (name key)) label])])
 
 (defn theme-toggle
-  "Renders theme selector buttons inside the top bar portal."
+  "Renders MD3 quick theme pills and a 12-theme select in the top bar."
   []
   (let [current @(rf/subscribe [::theme/current-theme])]
-    [:div {:class "flex items-center gap-1 mr-2 print:hidden"}
-     (for [{:theme/keys [key label]} theme-options]
-       ^{:key key}
+    [:div {:class (str "flex items-center gap-1.5 mr-2 px-2 py-1 "
+                       "rounded-full border m3-tonal-surface print:hidden "
+                       theme/md-outline-variant)}
+     (for [{:theme/keys [key label]} quick-theme-options]
+       ^{:key (name key)}
        [common/button
         {:size :xs
          :variant (when (= current key) :primary)
          :on-click #(rf/dispatch [::theme/set-theme key])}
-        label])]))
+        label])
+     [theme-select current]]))
 
 (defn root-view
-  "Top-level Reagent application shell."
+  "Top-level Reagent MD3 application shell."
   []
   (let [route-kw @(rf/subscribe [::fx-router/route-name])]
     [layout/page-container {}

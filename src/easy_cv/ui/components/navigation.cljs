@@ -1,5 +1,5 @@
 (ns easy-cv.ui.components.navigation
-  "Top navigation bar, route menu, and top-bar portal."
+  "MD3 top navigation bar, animated route menu, and top-bar portal."
   (:require ["react-dom" :as rdom]
             [clojure.string :as str]
             [easy-cv.ui.components.common :as common]
@@ -40,30 +40,42 @@
 
 (defn- nav-dropdown
   [close-fn]
-  [:div {:class (cls "absolute left-0 top-full mt-1 w-56 rounded-md"
-                     "shadow-lg border z-50 py-1"
-                     t/bg-card t/border-subtle)
+  [:div {:class (cls "absolute left-0 top-full mt-2 w-60 rounded-2xl"
+                     "border z-50 p-1.5 m3-menu-surface m3-menu-enter"
+                     t/md-outline-variant)
          :on-mouse-leave close-fn}
    (for [{:nav/keys [route label]} nav-items]
      ^{:key (name route)}
      [:a {:href (safe-href route)
-          :class (cls "block px-4 py-2 text-sm hover:bg-white/5"
-                      t/text-primary)
+          :class (cls "flex items-center px-3.5 py-2.5 rounded-xl text-sm"
+                      "font-medium transition-colors m3-interactive"
+                      "hover:bg-[var(--md-state-hover)]" t/text-primary)
           :on-click close-fn}
       label])])
 
+(defn- menu-icon
+  []
+  [:span {:class "flex flex-col gap-1 w-4" :aria-hidden "true"}
+   [:span {:class "block h-0.5 w-4 rounded-full bg-current"}]
+   [:span {:class "block h-0.5 w-4 rounded-full bg-current"}]
+   [:span {:class "block h-0.5 w-3 rounded-full bg-current"}]])
+
 (defn menu-button
-  "Renders a toggleable route navigation dropdown button."
+  "Renders an animated MD3 toggleable route navigation dropdown button."
   []
   (let [open? (r/atom false)
         close-fn #(reset! open? false)]
     (fn []
       [:div {:class "relative"}
-       [:button {:class (cls "p-2 rounded hover:bg-white/10 transition-colors"
+       [:button {:class (cls "w-9 h-9 rounded-full flex items-center"
+                             "justify-center m3-interactive"
+                             "hover:bg-[var(--md-state-hover)]"
                              t/text-primary)
                  :on-click #(swap! open? not)
+                 :aria-expanded @open?
+                 :aria-label "Navigation"
                  :title "Navigation"}
-        [:span {:class "font-mono text-base font-bold"} "="]]
+        [menu-icon]]
        (when @open?
          [nav-dropdown close-fn])])))
 
@@ -72,21 +84,25 @@
   [& children]
   (when-let [el @(rf/subscribe [::top-bar-ref])]
     (rdom/createPortal
-     (r/as-element (into [:div {:class "h-full flex items-center"}] children))
+     (r/as-element
+      (into [:div {:class "h-full flex items-center"}] children))
      el)))
 
 (defn top-bar
-  "Renders the top application bar with navigation and help."
+  "Renders the MD3 top application bar with navigation and help."
   [{:keys [active-label help-href]}]
-  [:div {:class (cls "flex items-center w-full h-12 px-4 border-b"
-                     t/border-main t/bg-toolbar)}
+  [:div {:class (cls "flex items-center w-full h-14 px-4 border-b"
+                     "m3-tonal-surface shrink-0"
+                     t/md-outline-variant t/bg-toolbar)}
    [menu-button]
-   [:div {:class (cls "ml-4 font-bold text-lg" t/text-accent)}
+   [:div {:class (cls "ml-3 flex items-center gap-2 font-bold text-lg"
+                      "tracking-tight" t/text-accent)}
+    [:span {:class "inline-block w-2.5 h-2.5 rounded-full bg-current"}]
     (or active-label "Easy CV")]
-   [:div {:class "flex-grow h-full flex items-center justify-end"
+   [:div {:class "flex-grow h-full flex items-center justify-end gap-2"
           :ref #(rf/dispatch [::set-top-bar-ref %])}
     (when help-href
       [common/help-button
        {:href help-href
         :title "Documentation"
-        :class "ml-2 px-2 !py-1"}])]])
+        :class "ml-2"}])]])
