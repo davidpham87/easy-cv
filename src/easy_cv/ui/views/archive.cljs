@@ -1,10 +1,12 @@
 (ns easy-cv.ui.views.archive
-  "Fact archive view: filtering, quick entry, seeded tiers, snapshots, SQL."
+  "Fact archive view: filtering, sorting, graph, live inspector, snapshots."
   (:require [clojure.string :as str]
+            [easy-cv.core.archive-graph :as ag]
             [easy-cv.core.db :as db]
             [easy-cv.core.generators :as gen]
             [easy-cv.core.honeysql :as honeysql]
             [easy-cv.fx.datascript :as fx-ds]
+            [easy-cv.ui.components.archive-graph :as archive-graph-ui]
             [easy-cv.ui.components.common :as common]
             [easy-cv.ui.components.layout :as layout]
             [easy-cv.ui.theme :as t]
@@ -15,15 +17,8 @@
   [:all :work :education :volunteer :project :skill
    :document :hobby :person :org :cv/config])
 
-(defn- now-ms
-  "Return current epoch milliseconds in ClojureScript."
-  []
-  (.now js/Date))
-
-(defn- iso-now
-  "Return current ISO-8601 timestamp string."
-  []
-  (.toISOString (js/Date.)))
+(defn- now-ms [] (.now js/Date))
+(defn- iso-now [] (.toISOString (js/Date.)))
 
 (defn- parse-tags
   "Parse comma-separated tags string into a set of keywords."
@@ -34,46 +29,15 @@
        (map keyword)
        set))
 
-(defn fact-kind
-  "Infer primary display category keyword for any DataScript fact map."
-  [fact]
-  (cond
-    (:cv/id fact) :cv/config
-    (:person/email fact) :person
-    (:org/name fact) :org
-    (:history/type fact) (:history/type fact)
-    (:project/name fact) :project
-    (:skill/name fact) :skill
-    (:document/name fact) :document
-    (:hobby/name fact) :hobby
-    :else :other))
+(defn fact-kind [fact] (ag/fact-kind fact))
+(defn fact-label [fact] (ag/fact-label fact))
+(defn fact-summary [fact] (ag/fact-summary fact))
 
-(defn fact-label
-  "Return concise primary label string for a fact row."
-  [fact]
-  (or (:history/title fact)
-      (:project/name fact)
-      (:skill/name fact)
-      (:document/name fact)
-      (:hobby/name fact)
-      (:person/name fact)
-      (:org/name fact)
-      (:cv/title fact)
-      (str (:item/uuid fact))))
-
-(defn fact-summary
-  "Return secondary summary text for a fact row."
-  [fact]
-  (or (:history/subtitle fact)
-      (:history/description fact)
-      (:project/description fact)
-      (:skill/category fact)
-      (:document/venue fact)
-      (:hobby/description fact)
-      (:person/email fact)
-      (:org/location fact)
-      (when (:cv/id fact) (str "Target: " (:cv/id fact)))
-      ""))
+(defn- entity-id-str
+  "Return canonical string identifier matching archive-graph node ids."
+  [e]
+  (or (some-> (:item/uuid e) str)
+      (some-> (:cv/id e) str)))
 
 (defn- matches-filter?
   "True when fact satisfies type-k, tag-q, and text-q filters."
@@ -111,28 +75,20 @@
              :history/start-date "2024-01" :history/description detail))))
 
 (defn- facts->sql-rows
-  "Project DataScript archive facts into HoneySQL :facts row maps."
   [facts ts]
-  (mapv (fn [f]
-          {:uuid (str (:item/uuid f))
-           :entity_type (name (fact-kind f))
-           :attrs_transit (pr-str f)
-           :updated_at ts
-           :archived (if (:item/archived? f) 1 0)})
+  (mapv (fn [f] {:uuid (str (:item/uuid f)) :entity_type (name (fact-kind f))
+                 :attrs_transit (pr-str f) :updated_at ts
+                 :archived (if (:item/archived? f) 1 0)})
         (remove :cv/id facts)))
 
 (defn- configs->sql-rows
-  "Project CVConfig entities into HoneySQL :cv_configs row maps."
   [configs ts]
-  (mapv (fn [c]
-          {:uuid (str (:item/uuid c))
-           :title (or (:cv/title c) (str (:cv/id c)))
-           :config_transit (pr-str c)
-           :updated_at ts})
+  (mapv (fn [c] {:uuid (str (:item/uuid c))
+                 :title (or (:cv/title c) (str (:cv/id c)))
+                 :config_transit (pr-str c) :updated_at ts})
         configs))
 
 (defn- snapshots->sql-rows
-  "Project captured archive snapshots into HoneySQL :snapshots row maps."
   [snapshots ts]
   (mapv (fn [s]
           (-> {:parent_id (some-> (:snapshot/parent s) str)
@@ -149,66 +105,87 @@
   (let [facts (db/all-facts ds-db)
         configs (db/list-cv-configs ds-db)
         qfn (fn [[sql-str]]
-              (cond
-                (str/includes? sql-str "FROM facts")
-                (facts->sql-rows facts ts)
-                (str/includes? sql-str "FROM cv_configs")
-                (configs->sql-rows configs ts)
-                (str/includes? sql-str "FROM snapshots")
-                (snapshots->sql-rows snapshots ts)
-                :else []))]
+              (cond (str/includes? sql-str "FROM facts")
+                    (facts->sql-rows facts ts)
+                    (str/includes? sql-str "FROM cv_configs")
+                    (configs->sql-rows configs ts)
+                    (str/includes? sql-str "FROM snapshots")
+                    (snapshots->sql-rows snapshots ts)
+                    :else []))]
     (honeysql/db->sql-export qfn exported-at)))
 
-(rf/reg-cofx
- ::ds-db
- (fn [cofx _]
-   (assoc cofx :ds-db @fx-ds/conn)))
+(rf/reg-cofx ::ds-db (fn [cofx _] (assoc cofx :ds-db @fx-ds/conn)))
+
+(rf/reg-fx
+ ::copy-clipboard!
+ (fn [text]
+   (when (and (exists? js/navigator) (.-clipboard js/navigator))
+     (.writeText (.-clipboard js/navigator) (str text)))))
+
+(def ^:private default-slice
+  {:filter-type :all :filter-tag "" :search-text ""
+   :sort-by :label :sort-dir :asc
+   :selected-id nil :hovered-id nil :graph-layout :clustered
+   :inspector-format :edn :inspector-copied? false
+   :selected-tier :junior :snapshot-label "" :snapshots []
+   :quick-fact {:fact/kind :skill :fact/title ""
+                :fact/detail "" :fact/tags-text ""}})
+
+(rf/reg-event-db ::init
+                 (fn [db _] (update db :archive #(merge default-slice %))))
+
+(doseq [[ev-k field xform]
+        [[::set-filter-type :filter-type keyword]
+         [::set-filter-tag :filter-tag identity]
+         [::set-search-text :search-text identity]
+         [::set-hovered-node :hovered-id identity]
+         [::set-graph-layout :graph-layout keyword]
+         [::set-selected-tier :selected-tier keyword]
+         [::set-snapshot-label :snapshot-label identity]]]
+  (rf/reg-event-db ev-k
+                   (fn [db [_ v]] (assoc-in db [:archive field] (xform v)))))
 
 (rf/reg-event-db
- ::init
- (fn [app-db _]
-   (update app-db :archive
-           #(merge {:filter-type :all
-                    :filter-tag ""
-                    :search-text ""
-                    :selected-tier :junior
-                    :snapshot-label ""
-                    :snapshots []
-                    :quick-fact {:fact/kind :skill
-                                 :fact/title ""
-                                 :fact/detail ""
-                                 :fact/tags-text ""}}
-                   %))))
+ ::set-sort-by
+ (fn [db [_ col]]
+   (let [cur (get-in db [:archive :sort-by] :label)]
+     (if (= cur col)
+       (update-in db [:archive :sort-dir] #(if (= :desc %) :asc :desc))
+       (-> db (assoc-in [:archive :sort-by] col)
+           (assoc-in [:archive :sort-dir] :asc))))))
 
 (rf/reg-event-db
- ::set-filter-type
- (fn [app-db [_ type-k]]
-   (assoc-in app-db [:archive :filter-type] (keyword type-k))))
+ ::toggle-sort-dir
+ (fn [db _]
+   (update-in db [:archive :sort-dir] #(if (= :desc %) :asc :desc))))
 
 (rf/reg-event-db
- ::set-filter-tag
- (fn [app-db [_ tag-q]]
-   (assoc-in app-db [:archive :filter-tag] tag-q)))
+ ::select-node
+ (fn [db [_ nid]]
+   (-> db (assoc-in [:archive :selected-id] (some-> nid str))
+       (assoc-in [:archive :inspector-copied?] false))))
 
 (rf/reg-event-db
- ::set-search-text
- (fn [app-db [_ text-q]]
-   (assoc-in app-db [:archive :search-text] text-q)))
+ ::reset-selection
+ (fn [db _]
+   (-> db (assoc-in [:archive :selected-id] nil)
+       (assoc-in [:archive :inspector-copied?] false))))
 
 (rf/reg-event-db
- ::set-selected-tier
- (fn [app-db [_ tier]]
-   (assoc-in app-db [:archive :selected-tier] (keyword tier))))
+ ::set-inspector-format
+ (fn [db [_ fmt]]
+   (-> db (assoc-in [:archive :inspector-format] (keyword fmt))
+       (assoc-in [:archive :inspector-copied?] false))))
+
+(rf/reg-event-fx
+ ::copy-inspector
+ (fn [{:keys [db]} [_ text]]
+   {:db (assoc-in db [:archive :inspector-copied?] true)
+    ::copy-clipboard! text}))
 
 (rf/reg-event-db
  ::update-quick-fact
- (fn [app-db [_ field val]]
-   (assoc-in app-db [:archive :quick-fact field] val)))
-
-(rf/reg-event-db
- ::set-snapshot-label
- (fn [app-db [_ label]]
-   (assoc-in app-db [:archive :snapshot-label] label)))
+ (fn [db [_ f v]] (assoc-in db [:archive :quick-fact f] v)))
 
 (rf/reg-event-fx
  ::add-quick-fact
@@ -218,17 +195,13 @@
        {}
        {:db (assoc-in db [:archive :quick-fact]
                       {:fact/kind (:fact/kind qf :skill)
-                       :fact/title ""
-                       :fact/detail ""
-                       :fact/tags-text ""})
+                       :fact/title "" :fact/detail "" :fact/tags-text ""})
         :ds/transact [(build-quick-fact qf)]}))))
 
 (rf/reg-event-fx
  ::load-tier-archive
  (fn [{:keys [db]} [_ tier-override]]
-   (let [tier (or tier-override
-                  (get-in db [:archive :selected-tier])
-                  :junior)
+   (let [tier (or tier-override (get-in db [:archive :selected-tier]) :junior)
          archive (gen/generate-archive tier {:seed (mod (now-ms) 100000)})]
      {:db (assoc-in db [:archive :selected-tier] tier)
       :ds/transact (:archive/tx-data archive)})))
@@ -241,14 +214,11 @@
          parent (:snapshot/id (last snaps))
          raw-lbl (get-in db [:archive :snapshot-label])
          lbl (if (str/blank? raw-lbl)
-               (str "Snapshot #" (inc (count snaps)))
-               raw-lbl)
+               (str "Snapshot #" (inc (count snaps))) raw-lbl)
          snap (db/capture-snapshot
-               ds-db {:snapshot/parent parent
-                      :snapshot/label lbl
+               ds-db {:snapshot/parent parent :snapshot/label lbl
                       :snapshot/created-at (now-ms)})]
-     {:db (-> db
-              (update-in [:archive :snapshots] (fnil conj []) snap)
+     {:db (-> db (update-in [:archive :snapshots] (fnil conj []) snap)
               (assoc-in [:archive :snapshot-label] ""))})))
 
 (rf/reg-event-fx
@@ -256,9 +226,7 @@
  (fn [{:keys [db]} [_ snap-id]]
    (let [snaps (get-in db [:archive :snapshots] [])
          snap (first (filter #(= snap-id (:snapshot/id %)) snaps))]
-     (if snap
-       {:ds/restore-snapshot snap}
-       {}))))
+     (if snap {:ds/restore-snapshot snap} {}))))
 
 (rf/reg-event-fx
  ::export-sql-json
@@ -272,69 +240,97 @@
                          :io/mime-type "application/json"}})))
 
 (rf/reg-sub ::slice (fn [app-db _] (:archive app-db)))
-(rf/reg-sub ::filter-type :<- [::slice] (fn [s _] (or (:filter-type s) :all)))
-(rf/reg-sub ::filter-tag :<- [::slice] (fn [s _] (or (:filter-tag s) "")))
-(rf/reg-sub ::search-text :<- [::slice] (fn [s _] (or (:search-text s) "")))
-(rf/reg-sub ::selected-tier :<- [::slice]
-            (fn [s _] (or (:selected-tier s) :junior)))
-(rf/reg-sub ::snapshots :<- [::slice] (fn [s _] (or (:snapshots s) [])))
-(rf/reg-sub ::snapshot-label :<- [::slice]
-            (fn [s _] (or (:snapshot-label s) "")))
-(rf/reg-sub ::quick-fact :<- [::slice]
-            (fn [s _]
-              (or (:quick-fact s)
-                  {:fact/kind :skill :fact/title ""
-                   :fact/detail "" :fact/tags-text ""})))
+
+(doseq [[sub-k field default-v]
+        [[::filter-type :filter-type :all]
+         [::filter-tag :filter-tag ""]
+         [::search-text :search-text ""]
+         [::sort-by :sort-by :label]
+         [::sort-dir :sort-dir :asc]
+         [::selected-id :selected-id nil]
+         [::hovered-id :hovered-id nil]
+         [::graph-layout :graph-layout :clustered]
+         [::inspector-format :inspector-format :edn]
+         [::inspector-copied? :inspector-copied? false]
+         [::selected-tier :selected-tier :junior]
+         [::snapshots :snapshots []]
+         [::snapshot-label :snapshot-label ""]
+         [::quick-fact :quick-fact
+          {:fact/kind :skill :fact/title ""
+           :fact/detail "" :fact/tags-text ""}]]]
+  (rf/reg-sub sub-k :<- [::slice]
+              (fn [s _] (let [v (get s field)] (if (some? v) v default-v)))))
 (rf/reg-sub ::all-facts :<- [:easy-cv.fx.datascript/db]
             (fn [ds-db _] (db/all-facts ds-db)))
+(rf/reg-sub ::cv-configs :<- [:easy-cv.fx.datascript/db]
+            (fn [ds-db _] (db/list-cv-configs ds-db)))
 (rf/reg-sub ::fact-counts :<- [::all-facts]
             (fn [facts _] (frequencies (map fact-kind facts))))
+(rf/reg-sub ::tag-facets :<- [::all-facts]
+            (fn [facts _] (ag/extract-tag-facets facts)))
+
 (rf/reg-sub ::filtered-facts
             :<- [::all-facts] :<- [::filter-type]
             :<- [::filter-tag] :<- [::search-text]
-            (fn [[facts type-k tag-q text-q] _]
-              (filterv #(matches-filter? % type-k tag-q text-q) facts)))
+            :<- [::sort-by] :<- [::sort-dir]
+            (fn [[facts type-k tag-q text-q sort-k sort-d] _]
+              (-> (filterv #(matches-filter? % type-k tag-q text-q) facts)
+                  (ag/sort-facts sort-k sort-d))))
 
-(defn- with-val
-  "Attach HTML :value prop without an unqualified-key map literal."
-  [props v]
-  (assoc props (keyword "value") v))
+(rf/reg-sub ::network-graph
+            :<- [::all-facts] :<- [::cv-configs]
+            :<- [::filter-type] :<- [::selected-id] :<- [::graph-layout]
+            (fn [[facts cfgs type-k sel-id layout] _]
+              (ag/archive->network-graph
+               facts cfgs
+               {:filter-kind type-k :selected-id sel-id :layout layout})))
 
-(defn- select-opt
-  "Render an HTML <option> element for select controls."
-  [v lbl]
-  [:option (with-val {:key v} v) lbl])
+(rf/reg-sub ::selected-entity
+            :<- [::all-facts] :<- [::cv-configs] :<- [::selected-id]
+            (fn [[facts cfgs sel-id] _]
+              (when sel-id
+                (first (filter #(= sel-id (entity-id-str %))
+                               (concat facts cfgs))))))
+
+(defn- with-val [props v] (assoc props (keyword "value") v))
+(defn- select-opt [v lbl] [:option (with-val {:key v} v) lbl])
 
 (defn- labeled-input
-  "Render a labeled text input bound to an event prefix."
   [lbl placeholder v evt]
   [:div
    [common/label lbl]
    [common/input (with-val {:placeholder placeholder :on-change-event evt} v)]])
 
+(defn- filter-type-select
+  "Render Fact Type dropdown (first <select> in view)."
+  [ft]
+  (let [on-type #(rf/dispatch [::set-filter-type
+                               (keyword (.. % -target -value))])]
+    [:div
+     [common/label "Fact Type"]
+     [common/select
+      (with-val {:class "w-full text-sm" :on-change on-type} (subs (str ft) 1))
+      (for [k fact-type-options]
+        (let [s (subs (str k) 1)] (select-opt s s)))]]))
+
 (defn- filter-toolbar
-  "Render fact category, tag, and search filters."
+  "Render fact category, tag input, search, and clickable tag facet chips."
   []
   (let [ft @(rf/subscribe [::filter-type])
         ftag @(rf/subscribe [::filter-tag])
         fq @(rf/subscribe [::search-text])
-        on-type #(rf/dispatch [::set-filter-type
-                               (keyword (.. % -target -value))])]
+        facets @(rf/subscribe [::tag-facets])]
     [common/card {:class "mb-4"}
      [:div {:class "grid grid-cols-1 md:grid-cols-3 gap-3"}
-      [:div
-       [common/label "Fact Type"]
-       [common/select
-        (with-val {:class "w-full text-sm" :on-change on-type}
-          (subs (str ft) 1))
-        (for [k fact-type-options]
-          (let [s (subs (str k) 1)] (select-opt s s)))]]
+      [filter-type-select ft]
       [labeled-input "Tag Filter" "clojure, sql..." ftag [::set-filter-tag]]
       [labeled-input "Search" "Search title or summary..." fq
-       [::set-search-text]]]]))
+       [::set-search-text]]]
+     [archive-graph-ui/tag-facet-chips
+      {:facets facets :active-tag ftag
+       :on-select-tag #(rf/dispatch [::set-filter-tag %])}]]))
 
 (defn- quick-kind-select
-  "Render quick-entry fact kind dropdown."
   [kind]
   (let [on-k #(rf/dispatch [::update-quick-fact
                             :fact/kind (keyword (.. % -target -value))])]
@@ -365,39 +361,7 @@
        [common/button {:variant :primary :size :sm
                        :on-click #(rf/dispatch [::add-quick-fact])} "Add"]]]]))
 
-(defn- fact-row
-  "Render a single fact row inside the archive table."
-  [fact]
-  [common/tr {:key (str (:item/uuid fact))}
-   [common/td {} [common/badge {} (name (fact-kind fact))]]
-   [common/td {:class "font-medium"} (fact-label fact)]
-   [common/td {:class (str "text-xs " t/text-muted)} (fact-summary fact)]
-   [common/td {}
-    [:div {:class "flex flex-wrap gap-1"}
-     (for [tag (:item/tags fact)]
-       [common/badge {:key (name tag)} (name tag)])]]])
-
-(defn- facts-table
-  "Render filtered archive facts table."
-  []
-  (let [facts @(rf/subscribe [::filtered-facts])]
-    [common/table-container {}
-     [common/table {}
-      [common/thead {}
-       [common/tr {}
-        [common/th {} "Type"]
-        [common/th {} "Title"]
-        [common/th {} "Details"]
-        [common/th {} "Tags"]]]
-      [common/tbody {}
-       (if (empty? facts)
-         [common/tr {}
-          [common/td {:col-span 4 :class "text-center py-6"}
-           "No matching facts. Load a seeded tier or add a quick fact."]]
-         (for [fact facts] (fact-row fact)))]]]))
-
 (defn- tier-loader-card
-  "Render career tier dropdown and fake archive loader button."
   []
   (let [tier @(rf/subscribe [::selected-tier])
         on-t #(rf/dispatch [::set-selected-tier
@@ -413,7 +377,6 @@
        "Load Tier"]]]))
 
 (defn- snapshot-row
-  "Render a single snapshot entry with a restore button."
   [snap]
   [:div {:key (str (:snapshot/id snap))
          :class "flex items-center justify-between py-1 text-xs"}
@@ -424,7 +387,6 @@
     "Restore"]])
 
 (defn- snapshots-card
-  "Render epochal snapshot capture input and restore list."
   []
   (let [snaps @(rf/subscribe [::snapshots])
         lbl @(rf/subscribe [::snapshot-label])]
@@ -438,9 +400,7 @@
        "Capture"]]
      (for [snap (reverse snaps)] (snapshot-row snap))]))
 
-(defn- sql-export-card
-  "Render SQLite/JSON export card."
-  []
+(defn- sql-export-card []
   [common/card {}
    [common/section-header "SQLite / JSON Export"]
    [common/button {:variant :primary :size :sm :class "w-full"
@@ -448,25 +408,65 @@
     "Export SQL Tables JSON"]])
 
 (defn- sidebar-controls
-  "Render archive management sidebar cards."
+  "Render Live Inspector and archive management sidebar cards."
   []
-  [:div {:class "p-4 space-y-4"}
-   [tier-loader-card]
-   [snapshots-card]
-   [sql-export-card]])
+  (let [entity @(rf/subscribe [::selected-entity])
+        fmt @(rf/subscribe [::inspector-format])
+        copied? @(rf/subscribe [::inspector-copied?])]
+    [:div {:class "p-4 space-y-4"}
+     [archive-graph-ui/inspector-card
+      {:entity entity :format fmt :copied? copied?
+       :on-format-change #(rf/dispatch [::set-inspector-format %])
+       :on-copy #(rf/dispatch [::copy-inspector %])}]
+     [tier-loader-card] [snapshots-card] [sql-export-card]]))
+
+(defn- network-graph-section
+  "Subscribe to graph slice and render network-graph-panel."
+  []
+  (let [graph @(rf/subscribe [::network-graph])
+        layout @(rf/subscribe [::graph-layout])
+        sel-id @(rf/subscribe [::selected-id])
+        hov-id @(rf/subscribe [::hovered-id])]
+    [archive-graph-ui/network-graph-panel
+     {:graph graph :layout-mode layout :selected-id sel-id :hovered-id hov-id
+      :on-select #(rf/dispatch [::select-node %])
+      :on-hover #(rf/dispatch [::set-hovered-node %])
+      :on-toggle-layout #(rf/dispatch [::set-graph-layout %])
+      :on-reset #(rf/dispatch [::reset-selection])}]))
+
+(defn- sort-and-table-section
+  "Render sort controls, network graph, quick add, and facts table."
+  [shown sort-k sort-d sel-id]
+  [:<>
+   [archive-graph-ui/sort-controls-bar
+    {:sort-by sort-k :sort-dir sort-d
+     :on-sort-by #(rf/dispatch [::set-sort-by %])
+     :on-toggle-dir #(rf/dispatch [::toggle-sort-dir])}]
+   [network-graph-section]
+   [quick-add-card]
+   [archive-graph-ui/facts-table
+    {:facts shown :sort-by sort-k :sort-dir sort-d :selected-id sel-id
+     :id-fn entity-id-str :on-sort #(rf/dispatch [::set-sort-by %])
+     :on-select #(rf/dispatch [::select-node %])}]])
+
+(defn- main-archive-pane
+  "Render header, filters, sort controls, network graph, quick add, table."
+  []
+  (let [all-facts @(rf/subscribe [::all-facts])
+        shown @(rf/subscribe [::filtered-facts])
+        sort-k @(rf/subscribe [::sort-by])
+        sort-d @(rf/subscribe [::sort-dir])
+        sel-id @(rf/subscribe [::selected-id])]
+    [:div {:class "p-4"}
+     [common/page-header "Fact Archive"
+      [:span {:class (str "text-sm " t/text-muted)}
+       (str (count shown) " shown of " (count all-facts) " facts")]]
+     [filter-toolbar]
+     [sort-and-table-section shown sort-k sort-d sel-id]]))
 
 (defn view
   "Main Fact Archive Reagent view component."
   []
-  (let [all-facts @(rf/subscribe [::all-facts])
-        shown @(rf/subscribe [::filtered-facts])]
-    [layout/split-view {:ratio :2-1}
-     [:div {:class "p-4"}
-      [common/page-header
-       "Fact Archive"
-       [:span {:class (str "text-sm " t/text-muted)}
-        (str (count shown) " shown of " (count all-facts) " facts")]]
-      [filter-toolbar]
-      [quick-add-card]
-      [facts-table]]
-     [sidebar-controls]]))
+  [layout/split-view {:ratio :2-1}
+   [main-archive-pane]
+   [sidebar-controls]])
