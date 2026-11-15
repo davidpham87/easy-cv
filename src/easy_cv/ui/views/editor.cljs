@@ -2,6 +2,7 @@
   "Code Editor and multi-format I/O view with isolated [:editor] slice."
   (:require [clojure.string :as str]
             [easy-cv.core.db :as db]
+            [easy-cv.core.importer-guide :as guide]
             [easy-cv.core.io :as io]
             [easy-cv.core.render :as render]
             [easy-cv.core.solver :as solver]
@@ -10,6 +11,7 @@
             [easy-cv.ui.components.editor :as editor-comp]
             [easy-cv.ui.components.layout :as layout]
             [easy-cv.ui.theme :as t]
+            [easy-cv.ui.views.editor-helpers :as helpers]
             [re-frame.core :as rf]))
 
 (def editor-formats
@@ -102,6 +104,22 @@
                  "% No CVConfig available")
         ""))))
 
+(rf/reg-fx
+ :editor/copy-clipboard
+ (fn [{:keys [text on-done]}]
+   (when (and (exists? js/navigator) (.-clipboard js/navigator))
+     (.writeText (.-clipboard js/navigator) (or text "")))
+   (when on-done (rf/dispatch on-done))))
+
+(defn- apply-text-to-db
+  [db fmt text import-msg]
+  (let [res (parse-editor-source fmt text)]
+    (update db :editor merge
+            {:text text
+             :diagnostics (:editor/diagnostics res)
+             :errors (:editor/errors res)
+             :import-msg import-msg})))
+
 (rf/reg-event-db
  ::set-format
  (fn [db [_ fmt]]
@@ -116,13 +134,14 @@
 (rf/reg-event-db
  ::set-text
  (fn [db [_ text]]
+   (apply-text-to-db db (get-in db [:editor :format] :edn) text nil)))
+
+(rf/reg-event-db
+ ::load-starter-example
+ (fn [db _]
    (let [fmt (get-in db [:editor :format] :edn)
-         res (parse-editor-source fmt text)]
-     (update db :editor merge
-             {:text text
-              :diagnostics (:editor/diagnostics res)
-              :errors (:editor/errors res)
-              :import-msg nil}))))
+         ex (guide/example-payload fmt)]
+     (apply-text-to-db db fmt ex "Loaded starter example"))))
 
 (rf/reg-event-fx
  ::apply-import
@@ -140,11 +159,72 @@
                      :errors (:editor/errors res)
                      :import-msg "Fix validation errors before importing"})}))))
 
+(rf/reg-event-db
+ ::set-guide-tab
+ (fn [db [_ tab]]
+   (assoc-in db [:editor :guide-tab] tab)))
+
+(rf/reg-event-db
+ ::set-schema-mode
+ (fn [db [_ mode]]
+   (assoc-in db [:editor :schema-mode] mode)))
+
+(rf/reg-event-db
+ ::set-prompt-format
+ (fn [db [_ fmt]]
+   (assoc-in db [:editor :prompt-format] fmt)))
+
+(rf/reg-event-db
+ ::set-prompt-role
+ (fn [db [_ role]]
+   (assoc-in db [:editor :prompt-role] role)))
+
+(rf/reg-event-db
+ ::set-prompt-notes
+ (fn [db [_ notes]]
+   (assoc-in db [:editor :prompt-notes] notes)))
+
+(rf/reg-event-db
+ ::set-copy-msg
+ (fn [db [_ msg]]
+   (assoc-in db [:editor :copy-msg] msg)))
+
+(rf/reg-event-fx
+ ::copy-text
+ (fn [_ [_ text label]]
+   {:editor/copy-clipboard {:text text
+                            :on-done [::set-copy-msg (str "Copied " label)]}}))
+
+(rf/reg-event-fx
+ ::download-file
+ (fn [_ [_ filename mime-type content]]
+   {:io/download-file {:io/content content
+                       :io/filename filename
+                       :io/mime-type mime-type}}))
+
 (rf/reg-sub ::format (fn [db _] (get-in db [:editor :format] :edn)))
 (rf/reg-sub ::text (fn [db _] (get-in db [:editor :text] "")))
 (rf/reg-sub ::diagnostics (fn [db _] (get-in db [:editor :diagnostics] [])))
 (rf/reg-sub ::errors (fn [db _] (get-in db [:editor :errors])))
 (rf/reg-sub ::import-msg (fn [db _] (get-in db [:editor :import-msg])))
+(rf/reg-sub ::guide-tab (fn [db _] (get-in db [:editor :guide-tab] :guide)))
+(rf/reg-sub ::schema-mode
+            (fn [db _] (get-in db [:editor :schema-mode] :json-schema)))
+(rf/reg-sub ::prompt-format
+            (fn [db _] (get-in db [:editor :prompt-format] :json-ld)))
+(rf/reg-sub ::prompt-role (fn [db _] (get-in db [:editor :prompt-role] "")))
+(rf/reg-sub ::prompt-notes (fn [db _] (get-in db [:editor :prompt-notes] "")))
+(rf/reg-sub ::copy-msg (fn [db _] (get-in db [:editor :copy-msg])))
+
+(rf/reg-sub
+ ::llm-prompt
+ :<- [::prompt-format]
+ :<- [::prompt-role]
+ :<- [::prompt-notes]
+ (fn [[fmt role notes] _]
+   (guide/build-llm-cv-prompt {:prompt/target-format fmt
+                               :prompt/role-focus role
+                               :prompt/extra-notes notes})))
 
 (rf/reg-sub
  ::active-cv-id
@@ -189,7 +269,7 @@
 
 (defn- malli-error-card
   [errors import-msg]
-  [common/card {:class "mt-4"}
+  [common/card {:class "mt-4 rounded-2xl transition-all duration-200"}
    [:div {:class "flex items-center justify-between mb-2"}
     [:h3 {:class "text-sm font-semibold"} "Validation & Import Status"]
     (when import-msg
@@ -212,6 +292,15 @@
      :editor/on-apply #(rf/dispatch [::apply-import])
      :editor/apply-label "Import to Archive"}]])
 
+(defn- editor-workspace-grid
+  [fmt text diags errors import-msg]
+  [:div {:class "grid grid-cols-1 lg:grid-cols-12 gap-6 mt-4 items-start"}
+   [:div {:class "lg:col-span-7"}
+    [editor-body fmt text diags]
+    [malli-error-card errors import-msg]]
+   [:div {:class "lg:col-span-5"}
+    [helpers/helper-workspace-panel fmt]]])
+
 (defn view
   "Code Editor and multi-format I/O view."
   []
@@ -228,5 +317,4 @@
       [:p {:class (cls "text-sm mt-1" t/text-muted)}
        "Edit EDN, YAML, JSON-LD, BibTeX, or CSL-JSON with live checks."]]
      [format-selector-bar fmt archive-src cv-src]
-     [editor-body fmt text diags]
-     [malli-error-card errors import-msg]]))
+     [editor-workspace-grid fmt text diags errors import-msg]]))
