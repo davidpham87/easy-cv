@@ -21,7 +21,7 @@ jobs:
       with:
         cli: 'latest'
     - name: Cache deps.edn, .shadow-cljs and node modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           .shadow-cljs
@@ -31,9 +31,9 @@ jobs:
           .cpcache
           node_modules
           resources
-        key: ${{ runner.os }}-shadow-cljs-${{ hashFiles('deps.edn', 'package.json')}}
+        key: ${{ runner.os }}-ci-${{ hashFiles('deps.edn', 'package.json') }}
         restore-keys: |
-          ${{ runner.os }}-shadow-cljs-
+          ${{ runner.os }}-ci-
     - name: Run tests
       run: clojure -X:test
 
@@ -56,7 +56,7 @@ jobs:
       with:
         node-version: '20'
     - name: Cache deps.edn, .shadow-cljs and node modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           .shadow-cljs
@@ -65,10 +65,18 @@ jobs:
           ~/.deps.clj
           .cpcache
           node_modules
-        key: ${{ runner.os }}-shadow-cljs-${{ hashFiles('deps.edn', 'package.json')}}
+        key: ${{ runner.os }}-ci-${{ hashFiles('deps.edn', 'package.json') }}
         restore-keys: |
-          ${{ runner.os }}-shadow-cljs-
+          ${{ runner.os }}-ci-
     - name: Install npm dependencies
       run: npm install
-    - name: Compile shadow-cljs app
+    - name: Prepare js shims and assets
+      run: npm run assets:copy
+    - name: Build Tailwind CSS
+      run: npm run css:build
+    - name: Smoke check clojure -M:shadow-cljs compile app
       run: clojure -M:shadow-cljs compile app
+    - name: Compile shadow-cljs app
+      run: npx shadow-cljs compile app
+    - name: Compile and run shadow-cljs node tests
+      run: npx shadow-cljs compile test
